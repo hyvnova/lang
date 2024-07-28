@@ -52,6 +52,7 @@ impl Parser {
 
     /// Puts back a token that was read but not processed
     pub fn put_back(&mut self, token: Token) {
+        println!("[put_back] {:?}", token);
         self.remanider_token = Some(token);
     }
 
@@ -62,12 +63,7 @@ impl Parser {
         let token = self.next_token();
         let copy = token.clone();
         
-        if token.is_none() {
-            error(&["Unexpected EOF".to_string()], 
-                self.lexer.line, 
-                self.lexer.column
-            )
-        }
+        if token.is_none() { return None; }
         
         self.put_back(token.unwrap());
         copy
@@ -98,6 +94,9 @@ impl Parser {
                 self.ast.add(Node::Stmt(statement));
             } else if Lexer::is_expression_token(&token) {
                 let expr: Expr = self.parse_expr(None);
+                
+                println!("+ [parse] Adding expression to AST: {:?}", expr);
+                
                 self.ast.add(Node::Expr(expr));
             } else {
                 eprintln!("( ! ) [parse] Unknown token: {:?}", token);
@@ -119,12 +118,6 @@ impl Parser {
             }
             
             match token.kind {
-                TokenKind::L_BRACKET => {
-                    let block = self.parse_block();
-                    self.ast.add(Node::Expr(block));
-                    break;
-                }
-
                 // Assingment statement.
                 // `{ident} = {expr};``
                 // Multiple assingment statement.
@@ -223,23 +216,18 @@ impl Parser {
         let stop_at = stop_at.or(Some(&[TokenKind::NEW_LINE]));
         
         // * Capture all tokens that make up the expression
-        let mut t: Option<Token> = None; // Used to put back last token
         while let Some(token) = self.next_token() {
-            t = Some(token.clone());
-
-            if !Lexer::is_expression_token(&token)
-                && token.kind == TokenKind::SEMICOLON
-            {
-                break;
-            }
-
             println!(
                 "[parse_expr] {:?} stop_at={:?} buffer={:?}",
                 token, stop_at, buffer
             );
-
-            // If not stop at, stop at new_line
-            if stop_at.is_none() && token.kind == TokenKind::NEW_LINE {
+            
+            if !Lexer::is_expression_token(&token)
+                && token.kind == TokenKind::SEMICOLON
+                // If not stop at, stop at new_line
+                || (stop_at.is_none() && token.kind == TokenKind::NEW_LINE)
+            {
+                self.put_back(token); // Put back the token that stopped the expression
                 break;
             }
 
@@ -252,11 +240,13 @@ impl Parser {
                 TokenKind::L_PARENT => {
                     let expr = self.parse_paren();
                     buffer.push(expr);
+                    continue;
                 }
 
                 TokenKind::L_BRACKET => {
                     let expr = self.parse_block();
                     buffer.push(expr);
+                    continue;
                 }
 
                 TokenKind::NEW_LINE => {
@@ -305,17 +295,8 @@ impl Parser {
             continue;
         }
 
-        // Since last token was not part of the expr, put it back
-        if let Some(token) = t {
-            // SKip if token is a new line or semicolon or stop_at token
-            if token.kind != TokenKind::SEMICOLON
-                && token.kind != TokenKind::NEW_LINE
-                && (stop_at.is_none() || !stop_at.unwrap().contains(&token.kind))
-            {
-                self.put_back(token);
-            }
-        }
-
+        
+        
         self.parse_expr_from_buffer(buffer)
     }
 
@@ -422,9 +403,7 @@ impl Parser {
     fn parse_block(&mut self) -> Expr {
         println!("[parse_block]");
 
-        let childrem: Rc<RefCell<Vec<Node>>> = Rc::new(RefCell::new(Vec::new()));
-
-        self.ast.current_scope = childrem.clone();
+        self.ast.current_scope = Rc::new(RefCell::new(Vec::new()));
 
         while let Some(token) = self.peek_token() {
             if token.kind == TokenKind::R_BRACKET {
@@ -434,10 +413,13 @@ impl Parser {
 
             if Lexer::is_statement_token(&token) {
                 let stmt = self.parse_statement();
-                childrem.borrow_mut().push(Node::Stmt(stmt));
+                self.ast.current_scope.borrow_mut().push(Node::Stmt(stmt));
+                
             } else if Lexer::is_expression_token(&token) {
                 let expr = self.parse_expr(Some(&[TokenKind::R_BRACKET]));
-                childrem.borrow_mut().push(Node::Expr(expr));
+                println!("+ [parse_block] expr={:?}", expr);
+                
+                self.ast.current_scope.borrow_mut().push(Node::Expr(expr));
                 
                 if let Some(t) = self.stopped_at.take() {
                     if t.kind == TokenKind::R_BRACKET {
@@ -447,8 +429,9 @@ impl Parser {
                 
             }
         }
-        println!("[end parse_block] {:?}", self.ast.childrem.borrow());
-        let block = Expr::Block(childrem.borrow().clone());
+        let block = Expr::Block(self.ast.current_scope.borrow().clone());
+        println!("[end parse_block] {:?}", block);
+        
         self.ast.current_scope = self.ast.childrem.clone();
         block
     }

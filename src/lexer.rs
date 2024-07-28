@@ -335,10 +335,7 @@ impl Lexer {
 
     /// Statement token represent an instruction, such as `def`, `assign`, etc.
     pub fn is_statement_token(token: &Token) -> bool {
-        return 100 <= token.kind as i16 
-            && token.kind as i16 <= 199
-            ||  token.kind == TokenKind::L_BRACKET
-            ||  token.kind == TokenKind::R_BRACKET
+        return 100 <= token.kind as i16 && token.kind as i16 <= 199
     }
 }
 
