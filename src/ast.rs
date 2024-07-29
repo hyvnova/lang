@@ -7,11 +7,11 @@ pub enum Expr {
 
     Number(String),
     Identifier(String),
-    String(String),
+    Str(String),
 
     /// Represents a member access in an object through the dot operator.
     /// Example: `object.member`
-    MemberAcess { 
+    MemberAccess { 
         object: Box<Expr>,
         member: Box<Expr>,
     },
@@ -26,7 +26,7 @@ pub enum Expr {
     },
 
     /// Represents a function call. Ex. `function(name = value)``
-    NamedArg(String, Box<Expr>),
+    NamedArg(Box<Expr>, Box<Expr>),
 
     /// An array of expressions. Ex. `[1, 2, 3]`
     Array(Vec<Expr>),
@@ -61,8 +61,8 @@ impl PartialEq for Expr {
         match (self, other) {
             (Number(_), Number(_)) => true,
             (Identifier(_), Identifier(_)) => true,
-            (String(_), String(_)) => true,
-            (MemberAcess { .. }, MemberAcess { .. }) => true,
+            (Str(_), Str(_)) => true,
+            (MemberAccess { .. }, MemberAccess { .. }) => true,
             (Group(_), Group(_)) => true,
             (BinOp { .. }, BinOp { .. }) => true,
             (NamedArg(_, _), NamedArg(_, _)) => true,

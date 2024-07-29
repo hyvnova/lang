@@ -6,6 +6,8 @@ use crate::{
     log_utils::error,
 };
 
+/// Box-It, bit!
+/// Used to box an expression
 macro_rules! bit {
     // Box it
     ($x:expr) => {
@@ -44,25 +46,25 @@ impl Parser {
 
     pub fn next_token(&mut self) -> Option<Token> {
         if let Some(token) = self.remanider_token.take() {
-            println!("[next_token/remainder] {:?}", token);
+            // println!("[next_token/remainder] {:?}", token);
             return Some(token);
         }
 
         let token = self.lexer.next();
-        println!("[next_token] {:?}", token);
+        // println!("[next_token] {:?}", token);
         token
     }
 
     /// Puts back a token that was read but not processed
     pub fn put_back(&mut self, token: Token) {
-        println!("[put_back] {:?}", token);
+        // println!("[put_back] {:?}", token);
         self.remanider_token = Some(token);
     }
 
     /// Returns the next token without consuming it
     /// (It consumes the token but put's it back)
     pub fn peek_token(&mut self) -> Option<Token> {
-        print!("[peek_token]\n\t");
+        // print!("[peek_token]\n\t");
         let token = self.next_token();
         let copy = token.clone();
 
@@ -234,7 +236,38 @@ impl Parser {
 
                     let stmt = self.parse_assingment();
                     self.ast.add(Node::Stmt(stmt));
+
+                    continue;
                 }
+
+                // * Member access
+                TokenKind::DOT => {
+                    // If no previous expr, no left hand value
+                    if buffer.is_empty() {
+                        error(
+                            &[
+                                "Expected an expression before operator.".to_string(),
+                                format!("{:?} ...", token),
+                                "^^^ -- Expected something as: object.property".to_string(),
+                            ],
+                            self.lexer.line,
+                            self.lexer.column,
+                        );
+                    }
+
+                    let lhs = buffer.pop().unwrap();
+                    let member = self.parse_expr(stop_at);
+
+
+                    buffer.push(Expr::MemberAccess {
+                        object: bit!(lhs),
+                        member: bit!(member),
+                    });
+                    
+                    continue;
+                }
+                    
+                        
 
                 // * Operator
                 _ if Lexer::is_operator_token(&token) => {
@@ -295,7 +328,7 @@ impl Parser {
             let current_expr = &buffer[index];
             let next_expr = &buffer[index + 1];
 
-            // Function Call
+            // * Function Call
             // {ident}{sequence | Group}
             if let Expr::Identifier(_) = current_expr {
                 if let Expr::Sequence(_) | Expr::Group(_) = next_expr {
@@ -305,6 +338,7 @@ impl Parser {
                     };
                 }
             }
+
             index += 1;
         }
 
@@ -505,7 +539,7 @@ impl Parser {
     fn parse_value_token(&self, token: &Token) -> Expr {
         match token.kind {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),
-            TokenKind::STRING => Expr::String(token.value.clone()),
+            TokenKind::STRING => Expr::Str(token.value.clone()),
             TokenKind::IDENTIFIER => Expr::Identifier(token.value.clone()),
             _ => error(
                 &[

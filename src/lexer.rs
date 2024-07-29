@@ -162,7 +162,7 @@ impl Lexer {
         }
 
         // * Number
-        if ch.is_numeric() || ch == '.' {
+        if ch.is_numeric() {
             self.capture(ch, |char| char.is_numeric() || char == '.');
 
             // Ensure only 1 dot is present
