@@ -51,11 +51,12 @@ pub enum TokenKind {
     GT = 303,
 
     // Syntax -- 400/499
-    SEMICOLON = 400,
-    COLON = 401,
-    COMMA = 402,
-    DOT = 403,
-    HASH = 404,
+    SEMICOLON = 400, // ;
+    COLON = 401, // :
+    COMMA = 402, // ,
+    DOT = 403, // .
+    HASH = 404, // #
+    AT = 405, // @
 }
 
 impl PartialEq for TokenKind {
@@ -105,10 +106,7 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(path: PathBuf) -> Self {
-        let source = std::fs::read_to_string(path)
-        .expect("Could not read source file");
-
+    pub fn new(source: String) -> Self {
         Lexer {
             source,
             current_char_index: 0,
@@ -118,6 +116,11 @@ impl Lexer {
 
             current_token_value: None,
         }
+    }
+    
+    pub fn from_path(path: PathBuf) -> Self {
+        let source = std::fs::read_to_string(path).expect("Could not read source file");
+        Lexer::new(source)
     }
 
     pub fn next(&mut self) -> Option<Token> {
@@ -243,6 +246,7 @@ impl Lexer {
             ',' => return TokenKind::COMMA,
             '.' => return TokenKind::DOT,
             '#' => return TokenKind::HASH,
+            '@' => return TokenKind::AT,
 
             // Quotes
             '"' => {

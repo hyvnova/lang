@@ -1,6 +1,17 @@
 # Lang
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
+### TODO (Arithmetic update)
+- [ ] Negative numbers
+- [ ] Chain operations
+- [ ] Parentheses
+- [ ] Exponents
+- [ ] Modulus
+- [ ] Bitwise operations (Probably not now)
+
+### TODO (Future)
+- [ ] Gorawr <- Funny
+
 # Syntax
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
 ```lang

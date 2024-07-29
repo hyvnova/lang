@@ -24,7 +24,7 @@ pub fn benchmark_lex(filename: &str, num_runs: u32) {
         let start_time = Instant::now();
 
         // Run your lexer
-        let mut lexer = Lexer::new(path.clone());
+        let mut lexer = Lexer::from_path(path.clone());
         let mut count = 0;
         while let Some(token) = lexer.next() {
             println!("{}", token);

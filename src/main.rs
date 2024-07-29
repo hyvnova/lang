@@ -1,17 +1,8 @@
-
-mod lexer;
-mod log_utils;
-mod benchmark;
-mod parser;
-mod ast;
-
 use std::path::PathBuf;
-
-use lexer::Lexer;
-use parser::Parser;
+use lang::lexer::Lexer;
+use lang::parser::Parser;
 
 fn main() {
-
     let path = PathBuf::from("test.lang");
     let mut parser = Parser::new(path);
 

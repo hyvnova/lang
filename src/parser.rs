@@ -25,17 +25,20 @@ pub struct Parser {
 
     // Travel variables -- used to keep track of control flow
     stopped_at: Option<Token>, // token in which a parser stopped
+    capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
 }
 
 impl Parser {
     pub fn new(source_file: PathBuf) -> Self {
-        let lexer = Lexer::new(source_file);
+        let lexer = Lexer::from_path(source_file);
 
         Parser {
             remanider_token: None,
             lexer,
             ast: AST::new(),
+
             stopped_at: None,
+            capturing_sequence: false,
         }
     }
 
@@ -62,9 +65,11 @@ impl Parser {
         print!("[peek_token]\n\t");
         let token = self.next_token();
         let copy = token.clone();
-        
-        if token.is_none() { return None; }
-        
+
+        if token.is_none() {
+            return None;
+        }
+
         self.put_back(token.unwrap());
         copy
     }
@@ -94,9 +99,9 @@ impl Parser {
                 self.ast.add(Node::Stmt(statement));
             } else if Lexer::is_expression_token(&token) {
                 let expr: Expr = self.parse_expr(None);
-                
+
                 println!("+ [parse] Adding expression to AST: {:?}", expr);
-                
+
                 self.ast.add(Node::Expr(expr));
             } else {
                 eprintln!("( ! ) [parse] Unknown token: {:?}", token);
@@ -116,7 +121,7 @@ impl Parser {
             if token.kind == TokenKind::SEMICOLON {
                 break;
             }
-            
+
             match token.kind {
                 // Assingment statement.
                 // `{ident} = {expr};``
@@ -190,10 +195,10 @@ impl Parser {
                     self.put_back(token);
                     let expr = self.parse_expr(None);
                     self.ast.add(Node::Expr(expr));
-    
+
                     continue;
                 }
-                
+
                 _ => unimplemented!("Token {} is not implemented in parse_statement.", token),
             }
         }
@@ -207,21 +212,18 @@ impl Parser {
     ///
     /// ### Arguments
     /// `stop_at` is a tuple of token types that should stop the expression parsing.
-    fn parse_expr(
-        &mut self,
-        stop_at: Option<&[TokenKind]>,
-    ) -> Expr {
+    fn parse_expr(&mut self, stop_at: Option<&[TokenKind]>) -> Expr {
         let mut buffer: Vec<Expr> = Vec::new();
 
         let stop_at = stop_at.or(Some(&[TokenKind::NEW_LINE]));
-        
+
         // * Capture all tokens that make up the expression
         while let Some(token) = self.next_token() {
             println!(
                 "[parse_expr] {:?} stop_at={:?} buffer={:?}",
                 token, stop_at, buffer
             );
-            
+
             if !Lexer::is_expression_token(&token)
                 && token.kind == TokenKind::SEMICOLON
                 // If not stop at, stop at new_line
@@ -249,13 +251,11 @@ impl Parser {
                     continue;
                 }
 
-                TokenKind::NEW_LINE => {
-                    // If stop_at, ignore new lines
-                    if stop_at.is_some() {
-                        continue;
-                    } else {
-                        return self.parse_expr_from_buffer(buffer);
-                    }
+                // * Sequenence
+                // {expr}, {expr}, ...
+                TokenKind::COMMA => {
+                    self.capturing_sequence = true;
+                    continue;
                 }
 
                 // * Operator
@@ -295,8 +295,6 @@ impl Parser {
             continue;
         }
 
-        
-        
         self.parse_expr_from_buffer(buffer)
     }
 
@@ -330,6 +328,11 @@ impl Parser {
                 }
             }
             index += 1;
+        }
+
+        if self.capturing_sequence {
+            self.capturing_sequence = false;
+            return Expr::Sequence(buffer);
         }
 
         error(
@@ -394,7 +397,7 @@ impl Parser {
     }
 
     /// Parse a block of code.
-    /// ```
+    /// ```txt
     /// {
     ///     statement | expression
     ///     expression expression is the return value
@@ -414,24 +417,22 @@ impl Parser {
             if Lexer::is_statement_token(&token) {
                 let stmt = self.parse_statement();
                 self.ast.current_scope.borrow_mut().push(Node::Stmt(stmt));
-                
             } else if Lexer::is_expression_token(&token) {
                 let expr = self.parse_expr(Some(&[TokenKind::R_BRACKET]));
                 println!("+ [parse_block] expr={:?}", expr);
-                
+
                 self.ast.current_scope.borrow_mut().push(Node::Expr(expr));
-                
+
                 if let Some(t) = self.stopped_at.take() {
                     if t.kind == TokenKind::R_BRACKET {
                         break;
                     }
                 }
-                
             }
         }
         let block = Expr::Block(self.ast.current_scope.borrow().clone());
         println!("[end parse_block] {:?}", block);
-        
+
         self.ast.current_scope = self.ast.childrem.clone();
         block
     }
