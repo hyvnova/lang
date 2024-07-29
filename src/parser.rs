@@ -123,44 +123,10 @@ impl Parser {
             }
 
             match token.kind {
-                // Assingment statement.
-                // `{ident} = {expr};``
-                // Multiple assingment statement.
-                // `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
+                
                 TokenKind::ASSING => {
-                    if self.ast.current_scope.borrow().is_empty() {
-                        error(
-                            &[
-                                "Expected an identifier before assingment operator.".to_string(),
-                                format!("... {:?} ...", token),
-                            ],
-                            self.lexer.line,
-                            self.lexer.column,
-                        );
-                    }
-
-                    let ident: Expr = self.ast.current_scope.borrow_mut().pop().unwrap().into();
-                    let value = self.parse_expr(None);
-
-                    // * Single assingment           Multiple assingment
-                    if ident == Expr::Identifier(String::new())
-                        || ident == Expr::Sequence(Vec::new())
-                    {
-                        return Stmt::Assign {
-                            identifiers: vec![ident],
-                            values: vec![value],
-                        };
-                    } else {
-                        error(
-                            &[
-                                "Expected an identifier before assingment operator.".to_string(),
-                                format!("{:?} = {:?}", ident, value),
-                                " ^^^ - This is not an identifier.".to_string(),
-                            ],
-                            self.lexer.line,
-                            self.lexer.column,
-                        );
-                    }
+                    let stmt = self.parse_assingment();
+                    return stmt;
                 }
 
                 // Function definition
@@ -256,6 +222,18 @@ impl Parser {
                 TokenKind::COMMA => {
                     self.capturing_sequence = true;
                     continue;
+                }
+
+                // * Assingment
+                TokenKind::ASSING => {
+                    // Solve buffer, since it is LHS and 
+                    let lhs = self.parse_expr_from_buffer(buffer.clone());
+                    buffer.clear(); // Buffer was consumed in lhs
+
+                    self.ast.add(Node::Expr(lhs));
+
+                    let stmt = self.parse_assingment();
+                    self.ast.add(Node::Stmt(stmt));
                 }
 
                 // * Operator
@@ -416,12 +394,12 @@ impl Parser {
 
             if Lexer::is_statement_token(&token) {
                 let stmt = self.parse_statement();
-                self.ast.current_scope.borrow_mut().push(Node::Stmt(stmt));
+                self.ast.add(Node::Stmt(stmt));
             } else if Lexer::is_expression_token(&token) {
                 let expr = self.parse_expr(Some(&[TokenKind::R_BRACKET]));
                 println!("+ [parse_block] expr={:?}", expr);
 
-                self.ast.current_scope.borrow_mut().push(Node::Expr(expr));
+                self.ast.add(Node::Expr(expr));
 
                 if let Some(t) = self.stopped_at.take() {
                     if t.kind == TokenKind::R_BRACKET {
@@ -585,5 +563,49 @@ impl Parser {
         }
 
         expr.unwrap()
+    }
+
+    /// Called when encountering a ASSING (=) token. 
+    /// LHS (ident) should be in AST.current_scope.
+    /// * Assingment statement.
+    /// - `{ident} = {expr};`
+    /// * Multiple assingment statement.
+    /// - `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
+    fn parse_assingment(&mut self) -> Stmt {
+        if self.ast.current_scope.borrow().is_empty() {
+            error(
+                &[
+                    "Expected an identifier before assingment operator.".to_string(),
+                    format!("... = ..."),
+                    " ^^^ - This is not an identifier or not one present.".to_string(),
+                ],
+                self.lexer.line,
+                self.lexer.column,
+            );
+        }
+
+        let ident: Expr = self.ast.pop().unwrap().into();
+        let value = self.parse_expr(None);
+
+        // Single assingment           
+        if ident == Expr::Identifier(String::new())
+             // Multiple assingment
+            || ident == Expr::Sequence(Vec::new())
+        {
+            return Stmt::Assign {
+                identifiers: vec![ident],
+                values: vec![value],
+            };
+        } else {
+            error(
+                &[
+                    "Expected an identifier before assingment operator.".to_string(),
+                    format!("{:?} = {:?}", ident, value),
+                    " ^^^ - This is not an identifier.".to_string(),
+                ],
+                self.lexer.line,
+                self.lexer.column,
+            );
+        }
     }
 }

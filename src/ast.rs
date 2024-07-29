@@ -162,8 +162,14 @@ impl AST {
         }
     }
 
+    /// Add a new node to the current scope.
     pub fn add(&mut self, node: Node) {
         self.current_scope.borrow_mut().push(node);
+    }
+
+    /// Perform a pop operation on the current scope. 
+    pub fn pop(&mut self) -> Option<Node> {
+        self.current_scope.borrow_mut().pop()
     }
 }
 
