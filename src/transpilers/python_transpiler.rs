@@ -9,6 +9,7 @@ impl Transpile for Expr {
         use Expr::*;
         match self {
             Empty => "".to_string(),
+
             Number(n) => n.to_string(),
             Identifier(ident) => ident.to_string(),
             Str(value) => format!("\"{}\"", value),
@@ -22,6 +23,8 @@ impl Transpile for Expr {
             BinOp { left, op, right } => {
                 format!("{} {} {}", left.transpile(), op, right.transpile())
             }
+
+            UnaryOp { op, expr } => format!("{}{}", op, expr.transpile()),
 
             NamedArg(name, value) => format!("{} = {}", name.transpile(), value.transpile()),
 
@@ -145,7 +148,7 @@ impl Transpile for Node {
 pub fn transpile(ast: &AST) -> String {
     let mut code = String::new();
 
-    for node in ast.childrem.borrow().iter() {
+    for node in ast.children.borrow().iter() {
         code.push_str(&node.transpile());
     }
 

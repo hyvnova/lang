@@ -6,14 +6,14 @@ use lang::transpilers::python_transpiler::transpile;
 
 fn main() {
     let path = PathBuf::from("test.lang");
-    let mut parser = Parser::new(path);
+    let mut parser = Parser::from_path(path);
 
     let ast = parser.parse();
 
     println!("\n\n");
     println!("-----------------------------------------------------");
 
-    for node in ast.childrem.borrow().iter() {
+    for node in ast.children.borrow().iter() {
         println!("{:?}", node);
     }
 

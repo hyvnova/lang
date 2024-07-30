@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
 use crate::{
     ast::{Expr, Node, Stmt, AST},
@@ -24,6 +24,9 @@ macro_rules! tkarr {
     };
 }
 
+
+/// 
+
 pub struct Parser {
     // Token that was read but not processed
     remanider_token: Option<Token>,
@@ -40,8 +43,8 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(source_file: PathBuf) -> Self {
-        let lexer = Lexer::from_path(source_file);
+    pub fn new(source: String) -> Self {
+        let lexer = Lexer::new(source);
 
         Parser {
             remanider_token: None,
@@ -51,6 +54,13 @@ impl Parser {
             stopped_at: None,
             capturing_sequence: false,
         }
+    }
+
+    pub fn from_path(source_file: PathBuf) -> Self {
+        let source: String = fs::read_to_string(&source_file)
+            .expect(&format!("Couldn't read file: {:?}", source_file));
+
+        Parser::new(source)
     }
 
     pub fn next_token(&mut self) -> Option<Token> {
@@ -321,10 +331,22 @@ impl Parser {
                     continue;
                 }
 
+                // * Unary Operator
+                _ if Lexer::is_bitwise_operator(&token) => {
+                    let expr = self.parse_unaryop(token);
+                    buffer.push(expr);
+                }
+
                 // * Operator
                 _ if Lexer::is_operator_token(&token) => {
                     // If no previous expr, no left hand value
                     if buffer.is_empty() {
+                        // If operator is "-" then it's a negation 
+                        if token.kind == TokenKind::SUBTRACT {
+                            let expr = self.parse_expr(Some(stop_at));
+                            return Expr::UnaryOp { op: '-'.to_string(), expr: bit!(expr) };
+                        }
+
                         error(
                             &[
                                 "Expected an expression before operator.".to_string(),
@@ -494,7 +516,7 @@ impl Parser {
         let block = Expr::Block(self.ast.current_scope.borrow().clone());
         println!("[end parse_block] {:?}", block);
 
-        self.ast.current_scope = self.ast.childrem.clone();
+        self.ast.current_scope = self.ast.children.clone();
         block
     }
 
@@ -584,6 +606,16 @@ impl Parser {
         }
     }
 
+    /// Parse a unary operator expression.
+    /// Should be called after encountering an bitwise op or negation token.
+    fn parse_unaryop(&mut self, operator: Token) -> Expr {
+        let expr = self.parse_expr(None);
+        Expr::UnaryOp {
+            op: operator.value,
+            expr: Box::new(expr),
+        }
+    }
+            
     fn parse_value_token(&self, token: &Token) -> Expr {
         match token.kind {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),

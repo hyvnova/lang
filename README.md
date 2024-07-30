@@ -2,12 +2,7 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO 
-- Tests for Assingment and multiple assingment  <- Needed
-- Negative numbers 
-- Parentheses <- Check this
-- Exponents
-- Modulus
-- Bitwise operations (Probably not now)
+
 
 ### TODO (Future)
 - [ ] Gorawr <- Funny

@@ -24,6 +24,11 @@ pub enum Expr {
         op: String,
         right: Box<Expr>,
     },
+    
+    UnaryOp {
+        op: String,
+        expr: Box<Expr>,
+    },
 
     /// Represents a function call. Ex. `function(name = value)``
     NamedArg(Box<Expr>, Box<Expr>),
@@ -155,7 +160,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 pub struct AST {
-    pub childrem: Rc<RefCell<Vec<Node>>>,
+    pub children: Rc<RefCell<Vec<Node>>>,
     pub current_scope: Rc<RefCell<Vec<Node>>>, // scope where we add new nodes
 }
 
@@ -164,7 +169,7 @@ impl AST {
         let childrem: Rc<RefCell<Vec<Node>>> = Rc::new(RefCell::new(Vec::new()));
 
         AST {
-            childrem: Rc::clone(&childrem),
+            children: Rc::clone(&childrem),
             current_scope: Rc::clone(&childrem),
         }
     }
@@ -179,4 +184,3 @@ impl AST {
         self.current_scope.borrow_mut().pop()
     }
 }
-

@@ -60,20 +60,28 @@ pub enum TokenKind {
     MULTIPLY,
     DIVIDE,
     POW,
+    MOD,
 
     // Logical
     //   Comparison
+
     EQ, // ==
     NE, // !=
-
     LT, // <
     LE, // <=
     GT, // >
     GE, // >=
 
+    _bitwise_start, // index to start of bitwise operator tokens
+
+    NEG, // !
+    AND, // &
+    OR,  // |
+    XOR, // ^
+    NOT, // ~
+
     _op_end, // index to end of operator tokens
     
-    NOT, // !
 
     // Syntax
     SEMICOLON, // ;
@@ -230,20 +238,41 @@ impl Lexer {
         // * Special characters
         self.current_token_value = Some(ch.to_string());
 
-        // TODO: Theres a little error.
-        // The value of a `Token` is set above, but
-        // If some tokenkind use 2 characters, these tokens will only
-        // have the first character as value.
-
         match ch {
             // Comparison
             '=' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("==".to_string());
                 return TokenKind::EQ;
             }
-            '!' => return TokenKind::NOT,
+
+            '<' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("<=".to_string());
+                return TokenKind::LE;
+            },
+
+            '>' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some(">=".to_string());
+                return TokenKind::GE;
+            },
+
+            '!' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("!=".to_string());
+                return TokenKind::NE;
+            },
+
+            '!' => return TokenKind::NEG,
             '<' => return TokenKind::LT,
             '>' => return TokenKind::GT,
+
+            // Bitwise
+            '&' => return TokenKind::AND,
+            '|' => return TokenKind::OR,
+            '^' => return TokenKind::XOR,
+            '~' => return TokenKind::NOT,
 
             // Instruction
             '=' => return TokenKind::ASSIGN,
@@ -266,10 +295,13 @@ impl Lexer {
             _ if ch == '*' && self.peek_next_char() == Some('*') => {
                 self.current_char_index += 1; // Move past *
                 self.column += 1;
+                self.current_token_value = Some("**".to_string());
                 return TokenKind::POW;
             }
+
             '*' => return TokenKind::MULTIPLY,
             '/' => return TokenKind::DIVIDE,
+            '%' => return TokenKind::MOD,
 
             // Syntax
             ';' => return TokenKind::SEMICOLON,
@@ -372,5 +404,9 @@ impl Lexer {
     pub fn is_statement_token(token: &Token) -> bool {
         return token.kind as i16 > TokenKind::_stmt_start as i16
             && (token.kind as i16) < TokenKind::_stmt_end as i16;
+    }
+
+    pub fn is_bitwise_operator(token: &Token) -> bool {
+        return token.kind as i16 > TokenKind::_bitwise_start as i16;
     }
 }
