@@ -1,63 +1,100 @@
+use phf::phf_map;
+
 use crate::log_utils::error;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
 pub enum TokenKind {
-    // Special -- -199/-100
-    EOF = -199,      // End of file
-    NEW_LINE = -198, // New line
+    // Special
+    EOF,      // End of file
+    NEW_LINE, // New line
 
-    // Statement -- 100/199
+    // Statement
+    _stmt_start, // index to start of statement tokens
     //   Instructions
-    DEF = 100,
-    ASSING = 101, //
+    DEF,
+    ASSIGN,   // =
+    IMPORT,   // import
+    CONTINUE, // continue
+    BREAK,    // break
+    LOOP,     // loop
+    FROM,     // from
+    AS,      // as  (for aliasing)
 
-    // Expressions -- >=200
+    _stmt_end, // index to end of statement tokens
+
+    // Expressions
+    _expr_start, // index to start of expression tokens
     //   Parenthesis
-    L_PARENT = 200,
-    R_PARENT = 201,
+    L_PARENT,
+    R_PARENT,
 
     //   Brackets
-    L_BRACKET = 202,
-    R_BRACKET = 203,
+    L_BRACKET,
+    R_BRACKET,
 
     //   Square brackets
-    L_SQUARE_BRACKET = 204,
-    R_SQUARE_BRACKET = 205,
+    L_SQUARE_BRACKET,
+    R_SQUARE_BRACKET,
 
-    //   Values -- 210/249
-    IDENTIFIER = 210,
-    NUMBER = 211,
-    STRING = 212,
+    //   Values
+    _value_start, // index to start of value tokens
 
-    //   Quotes 280/289
-    SINGLE_QUOTE = 280, // '
-    DOUBLE_QUOTE = 281, // "
-    BACK_TICK = 282,    // `
+    IDENTIFIER,
+    NUMBER,
+    STRING,
 
-    //   Arithmetic -- 290/299
-    ADD = 290,
-    SUBTRACT = 291,
-    MULTIPLY = 293,
-    DIVIDE = 294,
-    POW = 295,
+    _value_end, // index to end of value tokens
 
-    // Logical -- 300/399
-    //   Comparinson
-    EQ = 300,
-    NOT = 301,
-    LT = 302,
-    GT = 303,
+    //   Quotes
+    SINGLE_QUOTE, // '
+    DOUBLE_QUOTE, // "
+    BACK_TICK,    // `
 
-    // Syntax -- 400/499
-    SEMICOLON = 400, // ;
-    COLON = 401, // :
-    COMMA = 402, // ,
-    DOT = 403, // .
-    HASH = 404, // #
-    AT = 405, // @
+    //   Arithmetic
+    _op_start, // index to start of operator tokens
+
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
+    POW,
+
+    // Logical
+    //   Comparison
+    EQ, // ==
+    NE, // !=
+
+    LT, // <
+    LE, // <=
+    GT, // >
+    GE, // >=
+
+    _op_end, // index to end of operator tokens
+    
+    NOT, // !
+
+    // Syntax
+    SEMICOLON, // ;
+    COLON,     // :
+    COMMA,     // ,
+    DOT,       // .
+    HASH,      // #
+    AT,        // @
+
+    _expr_end, // index to end of expression tokens
 }
+
+const KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
+    "loop" => TokenKind::LOOP,
+    "continue" => TokenKind::CONTINUE,
+    "break" => TokenKind::BREAK,
+    "def" => TokenKind::DEF,
+    "import" => TokenKind::IMPORT,
+    "from" => TokenKind::FROM,
+    "as" => TokenKind::AS,
+};
 
 impl PartialEq for TokenKind {
     fn eq(&self, other: &Self) -> bool {
@@ -76,11 +113,7 @@ pub struct Token {
 
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "<Token {:?} = {} >",
-            self.kind, self.value
-        )
+        write!(f, "<Token {:?} = {} >", self.kind, self.value)
     }
 }
 
@@ -110,14 +143,14 @@ impl Lexer {
         Lexer {
             source,
             current_char_index: 0,
-            
+
             line: 1,
             column: 0,
 
             current_token_value: None,
         }
     }
-    
+
     pub fn from_path(path: PathBuf) -> Self {
         let source = std::fs::read_to_string(path).expect("Could not read source file");
         Lexer::new(source)
@@ -149,7 +182,6 @@ impl Lexer {
 
         // Skip whitespaces
         if ch.is_whitespace() {
-
             // New line
             if ch == '\n' {
                 self.line += 1;
@@ -166,11 +198,16 @@ impl Lexer {
             self.capture(ch, |char| char.is_numeric() || char == '.');
 
             // Ensure only 1 dot is present
-            if self.current_token_value.as_ref().unwrap().matches('.').count() > 1 {
+            if self
+                .current_token_value
+                .as_ref()
+                .unwrap()
+                .matches('.')
+                .count()
+                > 1
+            {
                 error(
-                    &[
-                        "Invalid number".to_string(),
-                    ],
+                    &["Invalid number".to_string()],
                     self.line,
                     self.current_char_index,
                 );
@@ -184,37 +221,32 @@ impl Lexer {
             self.capture(ch, Lexer::is_identifier);
 
             // ! Keywords
-            match self.current_token_value.as_ref().unwrap().as_str() {
-                "def" => return TokenKind::DEF,
-
-                _ => return TokenKind::IDENTIFIER,
-            }
+            return KEYWORDS
+                .get(self.current_token_value.as_ref().unwrap().as_str())
+                .copied()
+                .unwrap_or(TokenKind::IDENTIFIER);
         }
 
         // * Special characters
         self.current_token_value = Some(ch.to_string());
 
-
         // TODO: Theres a little error.
-        // The value of a `Token` is set above, but 
+        // The value of a `Token` is set above, but
         // If some tokenkind use 2 characters, these tokens will only
         // have the first character as value.
 
         match ch {
-            
             // Comparison
             '=' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
-                return TokenKind::EQ
-            },
+                return TokenKind::EQ;
+            }
             '!' => return TokenKind::NOT,
             '<' => return TokenKind::LT,
             '>' => return TokenKind::GT,
 
             // Instruction
-            '=' => {
-                return TokenKind::ASSING
-            },
+            '=' => return TokenKind::ASSIGN,
 
             // Parenthesis
             '(' => return TokenKind::L_PARENT,
@@ -234,9 +266,8 @@ impl Lexer {
             _ if ch == '*' && self.peek_next_char() == Some('*') => {
                 self.current_char_index += 1; // Move past *
                 self.column += 1;
-                return TokenKind::POW
+                return TokenKind::POW;
             }
-                ,
             '*' => return TokenKind::MULTIPLY,
             '/' => return TokenKind::DIVIDE,
 
@@ -264,9 +295,7 @@ impl Lexer {
             '`' => return TokenKind::BACK_TICK,
 
             _ => error(
-                &[
-                    format!("Unexpected character: {}", ch),
-                ],
+                &[format!("Unexpected character: {}", ch)],
                 self.line,
                 self.current_char_index,
             ),
@@ -319,28 +348,29 @@ impl Lexer {
         self.current_token_value = Some(value);
     }
 
-
     // ! Helper functions to determine what kind of token is being read
 
     ///  Expression tokens are anything that can be part of an expression -- almost everything
     pub fn is_expression_token(token: &Token) -> bool {
-        return token.kind as i16 >= 200;
+        return token.kind as i16 > TokenKind::_expr_start as i16
+            && (token.kind as i16) < TokenKind::_expr_end as i16;
     }
 
     /// Value tokens are tokens that represent a value, such as a number or a string
     pub fn is_value_token(token: &Token) -> bool {
-        return token.kind as i16 >= 210 && token.kind as i16 <= 249;
+        return token.kind as i16 > TokenKind::_value_start as i16
+            && (token.kind as i16) < TokenKind::_value_end as i16;
     }
 
     /// Operators tokens represent an operator, such as +, -, *, /, etc.
     pub fn is_operator_token(token: &Token) -> bool {
-        return token.kind as i16 >= 290 && token.kind as i16 <= 299;
+        return token.kind as i16 > TokenKind::_op_start as i16
+            && (token.kind as i16) < TokenKind::_op_end as i16;
     }
 
     /// Statement token represent an instruction, such as `def`, `assign`, etc.
     pub fn is_statement_token(token: &Token) -> bool {
-        return 100 <= token.kind as i16 && token.kind as i16 <= 199
+        return token.kind as i16 > TokenKind::_stmt_start as i16
+            && (token.kind as i16) < TokenKind::_stmt_end as i16;
     }
 }
-
-

@@ -49,7 +49,11 @@ pub enum Expr {
     Dict {
         keys: Vec<Expr>,
         values: Vec<Expr>,
-    }
+    },
+
+    /// Alias for something
+    /// as {expr}
+    Alias(Box<Expr>) 
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.
@@ -95,6 +99,9 @@ pub enum Stmt {
         args: Expr, // Expr::Sequence
         body: Expr, // Expr::Block
     },
+
+    Import(Expr, Option<Expr>), // import <thing> [as <alias>]          last arguments the optional alias
+    From(Expr, Expr, Option<Expr>), // from <a> import <b> [as <alias>]
 }
 
 impl PartialEq for Stmt {

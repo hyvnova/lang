@@ -1,2 +1,2 @@
-a = __import__("math")
+import math as a
 print( a.ceil(0.1) )

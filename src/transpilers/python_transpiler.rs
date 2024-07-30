@@ -1,8 +1,7 @@
-/// Transpile to Python 
+/// Transpile to Python
 /// This mode implements the Transpile trait for the AST Node, Stmt and Expr
 /// It converts the AST to a string representation of the code in Python
-
-use crate::ast::{Node, AST, Stmt, Expr};
+use crate::ast::{self, Expr, Node, Stmt, AST};
 use crate::transpilers::Transpile;
 
 impl Transpile for Expr {
@@ -13,19 +12,16 @@ impl Transpile for Expr {
             Number(n) => n.to_string(),
             Identifier(ident) => ident.to_string(),
             Str(value) => format!("\"{}\"", value),
-            
-            MemberAccess {
-                object,
-                member,
-            } => format!("{}.{}", object.transpile(), member.transpile()),
-            
+
+            MemberAccess { object, member } => {
+                format!("{}.{}", object.transpile(), member.transpile())
+            }
+
             Group(expr) => format!("({})", expr.transpile()),
 
-            BinOp {
-                left,
-                op,
-                right,
-            } => format!("{} {} {}", left.transpile(), op, right.transpile()),
+            BinOp { left, op, right } => {
+                format!("{} {} {}", left.transpile(), op, right.transpile())
+            }
 
             NamedArg(name, value) => format!("{} = {}", name.transpile(), value.transpile()),
 
@@ -39,7 +35,7 @@ impl Transpile for Expr {
                 }
                 code.push_str("]");
                 code
-            },
+            }
 
             Sequence(values) => {
                 let mut code = String::from("(");
@@ -51,29 +47,25 @@ impl Transpile for Expr {
                 }
                 code.push_str(")");
                 code
-            },
+            }
 
-            // TODO: Don't know how to implement this yet 
+            // TODO: Don't know how to implement this yet
             Block(nodes) => {
                 let mut code = String::new();
                 for node in nodes.iter() {
                     code.push_str(&node.transpile());
                 }
                 code
-            },
+            }
 
-            FunctionCall {
-                name,
-                args,
-            } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+            FunctionCall { name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
-            Dict {
-                keys,
-                values,
-            } => {
+            Dict { keys, values } => {
                 let mut code: String = String::from("{");
                 for (i, key) in keys.iter().enumerate() {
-                    code.push_str(format!("{}: {}", key.transpile(), values[i].transpile()).as_str());
+                    code.push_str(
+                        format!("{}: {}", key.transpile(), values[i].transpile()).as_str(),
+                    );
                     if i < keys.len() - 1 {
                         code.push_str(", ");
                     }
@@ -81,9 +73,10 @@ impl Transpile for Expr {
                 code.push_str("}");
                 code
             }
+
+            Alias(name) => format!("as {}", name.transpile()),
         }
     }
-            
 }
 
 impl Transpile for Stmt {
@@ -108,11 +101,38 @@ impl Transpile for Stmt {
                 code
             }
 
-            _ => "None".to_string(),
+            FunctionDef { name, args, body } => {
+                let mut code = String::new();
+                code.push_str("def ");
+                code.push_str(&name.transpile());
+                code.push_str(&args.transpile());
+                code.push_str(":\n");
+                code.push_str(&body.transpile());
+
+                code
+            }
+
+            Import(name, alias) => format!(
+                "import {}{}\n",
+                name.transpile(),
+                match alias {
+                    Some(alias) => format!(" as {}", alias.transpile()),
+                    None => "".to_string(),
+                }
+            ),
+            From(name, thing, alias) => format!(
+                "from {} import {}{}\n",
+                name.transpile(),
+                thing.transpile(),
+                match alias {
+                    Some(alias) => format!(" as {}", alias.transpile()),
+                    None => "".to_string(),
+                }
+            ),
         }
     }
 }
-            
+
 impl Transpile for Node {
     fn transpile(&self) -> String {
         match self {
