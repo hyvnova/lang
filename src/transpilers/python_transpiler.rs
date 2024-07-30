@@ -88,6 +88,8 @@ impl Transpile for Stmt {
         match self {
             Expr(expr) => expr.transpile(),
 
+            Python(code) => code.to_string(),
+
             Assign {
                 identifiers,
                 values,

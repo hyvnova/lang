@@ -1,7 +1,7 @@
 use phf::phf_map;
 
 use crate::log_utils::error;
-use std::path::PathBuf;
+use std::{borrow::Borrow, path::PathBuf};
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
@@ -20,7 +20,9 @@ pub enum TokenKind {
     BREAK,    // break
     LOOP,     // loop
     FROM,     // from
-    AS,      // as  (for aliasing)
+    AS,       // as  (for aliasing)
+
+    PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
     _stmt_end, // index to end of statement tokens
 
@@ -64,7 +66,6 @@ pub enum TokenKind {
 
     // Logical
     //   Comparison
-
     EQ, // ==
     NE, // !=
     LT, // <
@@ -81,7 +82,6 @@ pub enum TokenKind {
     NOT, // ~
 
     _op_end, // index to end of operator tokens
-    
 
     // Syntax
     SEMICOLON, // ;
@@ -250,19 +250,19 @@ impl Lexer {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("<=".to_string());
                 return TokenKind::LE;
-            },
+            }
 
             '>' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some(">=".to_string());
                 return TokenKind::GE;
-            },
+            }
 
             '!' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("!=".to_string());
                 return TokenKind::NE;
-            },
+            }
 
             '!' => return TokenKind::NEG,
             '<' => return TokenKind::LT,
@@ -308,7 +308,60 @@ impl Lexer {
             ':' => return TokenKind::COLON,
             ',' => return TokenKind::COMMA,
             '.' => return TokenKind::DOT,
-            '#' => return TokenKind::HASH,
+            '#' => {
+                // ! Special keywords
+                self.capture(' ', |char| !&[' ', '\n'].contains(&char));
+
+                if self.current_token_value.is_none() {
+                    return TokenKind::HASH;
+                }
+
+                match self.current_token_value.as_ref().unwrap().trim() {
+                    "[python]" => {
+                        self.current_token_value = Some("".to_string());
+
+                        // Capture python code until #[python]
+                        let mut python_code = String::new();
+                        loop {
+                            let ch = self.next_char();
+                            if ch.is_none() {
+                                break;
+                            }
+
+                            if ch.unwrap() == '#' {
+                                let mut buffer: Vec<char> = Vec::with_capacity(11);
+                                for _ in 0..11 {
+                                    let ch = self.next_char();
+                                    if ch.is_none() {
+                                        break;
+                                    }
+                                    buffer.push(ch.unwrap());
+                                }
+
+                                let buff_str = buffer.iter().collect::<String>();
+                                println!("Buffer str  {}", buff_str);
+                                if buff_str == "[endpython]" {
+                                    break;
+                                } else {
+                                    python_code.push('#');
+                                    python_code.push_str(&buff_str);
+                                }
+                            }
+                            python_code.push(ch.unwrap());
+                        }
+                        self.current_token_value = Some(python_code);
+                        return TokenKind::PYTHON;
+                    }
+
+                    _ => {
+                        // move back to the start of the capture
+                        self.current_char_index -= self.current_token_value.as_ref().unwrap().len();
+
+                        self.current_token_value = Some("#".to_string());
+                        return TokenKind::HASH;
+                    }
+                }
+            }
             '@' => return TokenKind::AT,
 
             // Quotes

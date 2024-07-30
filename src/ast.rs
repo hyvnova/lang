@@ -89,6 +89,8 @@ impl PartialEq for Expr {
 pub enum Stmt {
     Expr(Expr),
 
+    Python(String), // Python code
+
     /// Represents a variable declaration. 
     /// The identifier can be a single identifier or a sequence of identifiers.
     /// Ex. `a = 1`, `a, b = 1, 2`

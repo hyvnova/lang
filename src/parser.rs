@@ -24,9 +24,6 @@ macro_rules! tkarr {
     };
 }
 
-
-/// 
-
 pub struct Parser {
     // Token that was read but not processed
     remanider_token: Option<Token>,
@@ -38,7 +35,7 @@ pub struct Parser {
     pub ast: AST,
 
     // Travel variables -- used to keep track of control flow
-    stopped_at: Option<Token>, // token in which a parser stopped
+    stopped_at: Option<TokenKind>, // token in which a parser stopped
     capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
 }
 
@@ -112,6 +109,7 @@ impl Parser {
 
             // New lines
             if token.kind == TokenKind::NEW_LINE {
+                self.next_token();
                 continue;
             }
 
@@ -144,6 +142,10 @@ impl Parser {
             }
 
             match token.kind {
+                TokenKind::PYTHON => {
+                    return Stmt::Python(token.value.clone());
+                }
+
                 TokenKind::ASSIGN => {
                     let stmt = self.parse_assingment();
                     return stmt;
@@ -178,10 +180,7 @@ impl Parser {
                 TokenKind::IMPORT => {
                     let expr = self.parse_expr(tkarr![SEMICOLON, NEW_LINE, AS]);
 
-                    if let Some(Token {
-                        kind: TokenKind::AS,
-                        ..
-                    }) = self.stopped_at
+                    if let Some( TokenKind::AS) = self.stopped_at
                     {
                         // let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
                         let alias = self.parse_expr(None);
@@ -213,10 +212,7 @@ impl Parser {
                         tkarr![SEMICOLON, NEW_LINE, AS],
                     );
 
-                    if let Some(Token {
-                        kind: TokenKind::AS,
-                        ..
-                    }) = self.stopped_at
+                    if let Some(Token) = self.stopped_at
                     {
                         let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
                         return Stmt::From(name, thing, Some(alias));
@@ -261,7 +257,7 @@ impl Parser {
 
             // If should stop
             if stop_at.contains(&token.kind) {
-                self.stopped_at = Some(token);
+                self.stopped_at = Some(token.kind);
                 return self.parse_expr_from_buffer(buffer);
             }
 
@@ -279,7 +275,7 @@ impl Parser {
                 }
 
                 TokenKind::L_BRACKET => {
-                    let expr = self.parse_block();
+                    let expr = self.parse_dict();
                     buffer.push(expr);
                     continue;
                 }
@@ -341,10 +337,13 @@ impl Parser {
                 _ if Lexer::is_operator_token(&token) => {
                     // If no previous expr, no left hand value
                     if buffer.is_empty() {
-                        // If operator is "-" then it's a negation 
+                        // If operator is "-" then it's a negation
                         if token.kind == TokenKind::SUBTRACT {
                             let expr = self.parse_expr(Some(stop_at));
-                            return Expr::UnaryOp { op: '-'.to_string(), expr: bit!(expr) };
+                            return Expr::UnaryOp {
+                                op: '-'.to_string(),
+                                expr: bit!(expr),
+                            };
                         }
 
                         error(
@@ -361,7 +360,7 @@ impl Parser {
                     buffer.push(binop);
 
                     if self.stopped_at.is_some()
-                        && stop_at.contains(&self.stopped_at.as_ref().unwrap().kind)
+                        && stop_at.contains(&self.stopped_at.as_ref().unwrap())
                     {
                         return self.parse_expr_from_buffer(buffer);
                     }
@@ -461,7 +460,7 @@ impl Parser {
             println!("[parse_paren] expr={:?} stop_token={:?}", expr, stop_token);
             buffer.push(expr);
 
-            match stop_token.unwrap().kind {
+            match stop_token.unwrap() {
                 TokenKind::COMMA => {
                     continue;
                 }
@@ -507,7 +506,7 @@ impl Parser {
                 self.ast.add(Node::Expr(expr));
 
                 if let Some(t) = self.stopped_at.take() {
-                    if t.kind == TokenKind::R_BRACKET {
+                    if t == TokenKind::R_BRACKET {
                         break;
                     }
                 }
@@ -539,21 +538,28 @@ impl Parser {
 
             let stop_token = self.stopped_at.take();
 
+            if stop_token.is_none() {
+                error(
+                    &[
+                        "Unexpected end of file.".to_string(),
+                        "{{ ...".to_string(),
+                        "Expected a key or closing bracket, but got nothing instead.".to_string(),
+                    ],
+                    self.lexer.line,
+                    self.lexer.column,
+                );
+            }
+
+            let stop_token = stop_token.unwrap();
+
             if let Some(key) = key {
                 match stop_token {
-                    Some(Token {
-                        kind: TokenKind::COMMA,
-                        ..
-                    })
-                    | Some(Token {
-                        kind: TokenKind::R_BRACKET,
-                        ..
-                    }) => {
+                    TokenKind::COMMA | TokenKind::R_BRACKET => {
                         if let Expr::Identifier(_) = key {
                             keys.push(key.clone());
                             values.push(key);
 
-                            if stop_token.unwrap().kind == TokenKind::R_BRACKET {
+                            if stop_token == TokenKind::R_BRACKET {
                                 break;
                             }
                         } else {
@@ -568,19 +574,13 @@ impl Parser {
                             );
                         }
                     }
-                    Some(Token {
-                        kind: TokenKind::COLON,
-                        ..
-                    }) => {
+                    TokenKind::COLON => {
                         let value = self.parse_expr(tkarr![COMMA, R_BRACKET]);
 
                         keys.push(key);
                         values.push(value);
 
-                        if let Some(Token {
-                            kind: TokenKind::R_BRACKET,
-                            ..
-                        }) = stop_token
+                        if let Some(TokenKind::R_BRACKET) = self.stopped_at
                         {
                             break;
                         }
@@ -615,7 +615,7 @@ impl Parser {
             expr: Box::new(expr),
         }
     }
-            
+
     fn parse_value_token(&self, token: &Token) -> Expr {
         match token.kind {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),
