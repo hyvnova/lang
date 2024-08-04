@@ -1,6 +1,6 @@
 use phf::phf_map;
 
-use crate::log_utils::log_error;
+use crate::error;
 use std::{borrow::Borrow, path::PathBuf};
 
 #[derive(Debug, Clone, Copy)]
@@ -59,7 +59,6 @@ pub enum TokenKind {
 
     ADD,
     SUBTRACT,
-    MULTIPLY,
     DIVIDE,
     POW,
     MOD,
@@ -74,6 +73,9 @@ pub enum TokenKind {
     GE, // >=
 
     _bitwise_start, // index to start of bitwise operator tokens
+
+    MULTIPLY, // <- placed here because can be used as *{expr} to dereference or unpack... so it's an unary operator
+
 
     NEG, // !
     AND, // &
@@ -136,7 +138,7 @@ impl PartialEq for Token {
 /// A lexer reads the given path and returns a callable that can use to "consume" the next token
 /// In other words, the lexer works lazily, only reading the next token when it's needed
 pub struct Lexer {
-    source: String,
+    pub source: String, // Public because error! uses to display the code that caused an error
 
     pub current_char_index: usize,
 
@@ -204,23 +206,7 @@ impl Lexer {
 
         // * Number
         if ch.is_numeric() {
-            self.capture(ch, |char| char.is_numeric() || char == '.');
-
-            // Ensure only 1 dot is present
-            if self
-                .current_token_value
-                .as_ref()
-                .unwrap()
-                .matches('.')
-                .count()
-                > 1
-            {
-                log_error(
-                    &["Invalid number".to_string()],
-                    self.line,
-                    self.current_char_index,
-                );
-            }
+            self.capture(ch, |char| char.is_numeric() || char == '.'); 
 
             return TokenKind::NUMBER;
         }
@@ -388,10 +374,9 @@ impl Lexer {
             // Reserved for syntax
             '`' => return TokenKind::BACK_TICK,
 
-            _ => log_error(
-                &[format!("Unexpected character: {}", ch)],
-                self.line,
-                self.current_char_index,
+            _ => error!(
+                self,
+                format!("Unexpected character: {}", ch)
             ),
         }
     }
@@ -421,6 +406,9 @@ impl Lexer {
     /// Captures characters while a condition is met
     /// Capture is placed at current_token_value
     /// If ch given as parameter  is a space it will not be placed in value
+    /// -
+    /// if condition matches for a "." char it will only be captured a max of 2 times. Meaning, only 2 dots will be captured, even if condition is met for more than 2 dots.
+    /// This to prevent the range operator from being captured as a number
     fn capture(&mut self, ch: char, condition: fn(char) -> bool) {
         let mut value = String::new();
         if ch != ' ' {
@@ -428,15 +416,35 @@ impl Lexer {
         }
 
         loop {
-            let char = self.next_char();
+            let ch = self.next_char();
 
-            if char.is_none() || !condition(char.unwrap()) {
+            if ch.is_none() || !condition(ch.unwrap()) {
                 self.current_char_index -= 1; // Move back, since char is not part of value
                 self.column -= 1;
                 break;
             }
 
-            value.push(char.unwrap());
+            // Prevent capturing more than 2 dots.
+            // If current char is a dot and there's already 1 dot in the value, break
+            if ch.unwrap() == '.' && value.matches('.').count() == 1 {
+
+                // If last ch in value is a dot, remove it, otherwise, error since it would be something as 2.3.2
+                if value.chars().last().unwrap() == '.' {
+                    value.pop();
+                } else {
+                    error!(
+                        self,
+                        format!("Invalid number, can't understand the use of dots... The number in question: {}", value)
+                    );
+                }
+
+                // Move back so both dots can be captured as Range
+                self.current_char_index -= 2;
+
+                break;
+            }
+
+            value.push(ch.unwrap());
         }
 
         self.current_token_value = Some(value);

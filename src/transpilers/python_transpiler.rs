@@ -79,12 +79,12 @@ impl Transpile for Expr {
 
             Alias(name) => format!("as {}", name.transpile()),
             
-            Range { start, end, inclusive: exclusive } => {
+            Range { start, end, inclusive } => {
                 format!(
                     "range({}, {}{})",
                     start.transpile(),
                     end.transpile(),
-                    if *exclusive { "" } else { "" }
+                    if *inclusive { "+1" } else { "" }
                 )
             }
         }

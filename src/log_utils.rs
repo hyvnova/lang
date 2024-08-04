@@ -2,27 +2,36 @@
 
 use std::process;
 
+use crate::lexer::Lexer;
+
 /// Prints an error message to the console and exits the program.
 ///
 /// # Arguments
-///
+/// * `lexer` - The lexer... 
 /// * `lines` - A slice of strings to print to the console. These can be error messages or the results of `LogUtilFunction`s.
-/// * `line` - line number where the error occurred.
-/// * `column` - column number where the error occurred.
-///
 /// # Panics
 ///
 /// This function does not return as it calls `process::exit(1)`.
-pub fn log_error(line: usize, column: usize, lines: &[String]) -> ! {
+pub fn log_error(lexer: &Lexer, lines: &[String]) -> ! {
+    // Determine the maximum width
+    let max_error_width = lines.iter().map(|s| s.len()).max().unwrap_or(50);
+    let source_line_width = lexer.source.lines().map(|s| s.len()).max().unwrap_or(0);
+    let indicator_width = lexer.column;
+    let width = max_error_width.max(source_line_width + indicator_width + 20);
+
     // Red text for the "Error" header
-    eprintln!("\x1b[31m{border}\x1b[0m", border = "━".repeat(50));
-    eprintln!("\x1b[31;1m{:^50}\x1b[0m", "Error");
-    eprintln!("\x1b[31m{border}\x1b[0m\n", border = "━".repeat(50));
+    eprintln!("\x1b[31m{border}\x1b[0m", border = "━".repeat(width));
+    eprintln!("\x1b[31;1m{:^width$}\x1b[0m", "Error", width = width);
+    eprintln!("\x1b[31m{border}\x1b[0m\n", border = "━".repeat(width));
 
     // Printing each line of the error message
     for line in lines {
         eprintln!("\t\x1b[31m{}\x1b[0m", line);
     }
+
+    let line = lexer.line;
+    let column = lexer.column;
+    let source = &lexer.source;
 
     // Display line and column information
     eprintln!(
@@ -35,8 +44,20 @@ pub fn log_error(line: usize, column: usize, lines: &[String]) -> ! {
         }
     );
 
+    // Display the source code with the error highlighted
+    let lines: Vec<&str> = source.lines().collect();
+    if line > 0 && line <= lines.len() {
+        let error_line = lines[line - 1];
+        eprintln!("\n\x1b[37m{:>5} |\x1b[0m {}", line, error_line);
+        eprintln!(
+            "\x1b[37m      |\x1b[0m {:>width$}\x1b[31m^\x1b[0m", 
+            "", 
+            width = column
+        );
+    }
+
     // Red text for the bottom border
-    eprintln!("\x1b[31m{border}\x1b[0m", border = "━".repeat(50));
+    eprintln!("\x1b[31m{border}\x1b[0m", border = "━".repeat(width));
     eprintln!();
 
     process::exit(1);
@@ -47,14 +68,12 @@ pub fn log_error(line: usize, column: usize, lines: &[String]) -> ! {
 /// Each argument is a line of the error message.
 macro_rules! error {
     (
-        $line:expr,
-        $col:expr,
+        $lexer:expr, // crate::lexer::Lexer
         $($lines:expr),*
     ) => {
         crate::log_utils::log_error(
-            $line, 
-            $col,
+            $lexer,
             &[ $( $lines.to_string() ),* ]
-        );
+        )
     };
 }

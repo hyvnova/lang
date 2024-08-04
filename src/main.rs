@@ -1,10 +1,7 @@
-use std::fmt::format;
 use std::path::PathBuf;
 use std::process::Command;
-use lang::lexer::Lexer;
 use lang::parser::Parser;
 use lang::transpilers::python_transpiler::transpile;
-use lang::error;
 
 fn main() {
     

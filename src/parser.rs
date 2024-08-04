@@ -1,7 +1,8 @@
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
-use crate::{error, 
+use crate::{
     ast::{Expr, Node, Stmt, AST},
+    error,
     lexer::{Lexer, Token, TokenKind},
 };
 
@@ -157,8 +158,7 @@ impl Parser {
 
                     if self.stopped_at.take().is_none() {
                         error!(
-                            self.lexer.line, 
-                            self.lexer.column,
+                            &self.lexer,
                             "Expected a parenthesis after function name.",
                             format!("def {:?} (...", name)
                         );
@@ -177,8 +177,7 @@ impl Parser {
                 TokenKind::IMPORT => {
                     let expr = self.parse_expr(tkarr![SEMICOLON, NEW_LINE, AS]);
 
-                    if let Some( TokenKind::AS) = self.stopped_at
-                    {
+                    if let Some(TokenKind::AS) = self.stopped_at {
                         // let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
                         let alias = self.parse_expr(None);
 
@@ -191,12 +190,11 @@ impl Parser {
                 // * From import
                 // `from {expr} import {expr}[as {expr}{; or new_line}`]
                 TokenKind::FROM => {
-                   let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![IMPORT]);
+                    let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![IMPORT]);
 
                     if self.stopped_at.is_none() {
                         error!(
-                            self.lexer.line,
-                            self.lexer.column,
+                            &self.lexer,
                             "Expected 'import' after 'from'.".to_string(),
                             format!("from {:?} ...", name)
                         );
@@ -207,8 +205,7 @@ impl Parser {
                         tkarr![SEMICOLON, NEW_LINE, AS],
                     );
 
-                    if let Some(Token) = self.stopped_at
-                    {
+                    if let Some(Token) = self.stopped_at {
                         let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
                         return Stmt::From(name, thing, Some(alias));
                     }
@@ -263,38 +260,39 @@ impl Parser {
             }
 
             match token.kind {
-                // Range 
+                // Range
                 // {start: expr}..{end: expr} (exclusive)
                 // {start: expr}..={end: expr} (inclusive)
                 TokenKind::D_DOT => {
-                    
                     // Get start of the range, if no start is provided, it's 0
                     let start = if buffer.is_empty() {
                         Expr::Number("0".to_string())
                     } else {
                         buffer.pop().unwrap()
                     };
-                    
+
                     // if next token is "="
                     let mut inclusive: bool = false;
-                    if let Some(Token { kind: TokenKind::ASSIGN, .. }) = self.peek_token() {
+                    if let Some(Token {
+                        kind: TokenKind::ASSIGN,
+                        ..
+                    }) = self.peek_token()
+                    {
                         self.next_token(); // Consume the "="
                         inclusive = true;
-                    } 
-                    
+                    }
+
                     let end = self.parse_expr(Some(stop_at));
-                    
-                    buffer.push(
-                        Expr::Range {
-                            start: bit!(start),
-                            end: bit!(end),
-                            inclusive,
-                        }
-                    );
+
+                    buffer.push(Expr::Range {
+                        start: bit!(start),
+                        end: bit!(end),
+                        inclusive,
+                    });
 
                     continue;
                 }
-                
+
                 TokenKind::L_PARENT => {
                     let expr = self.parse_paren();
                     buffer.push(expr);
@@ -333,8 +331,7 @@ impl Parser {
                     // If no previous expr, no left hand value
                     if buffer.is_empty() {
                         error!(
-                            self.lexer.line,
-                            self.lexer.column,
+                            &self.lexer,
                             "Expected an expression before operator.".to_string(),
                             format!("{:?} ...", token),
                             "^^^ -- Expected something as: object.property".to_string()
@@ -353,9 +350,15 @@ impl Parser {
                 }
 
                 // * Unary Operator
+                // {op}{expr}
                 _ if Lexer::is_bitwise_operator(&token) => {
-                    let expr = self.parse_unaryop(token);
-                    buffer.push(expr);
+                    println!("Unary Operator: {:?}", token);
+                    let expr = self.parse_expr(Some(stop_at));
+
+                    buffer.push(Expr::UnaryOp {
+                        op: token.value.clone(),
+                        expr: bit!(expr),
+                    });
                 }
 
                 // * Operator
@@ -441,8 +444,7 @@ impl Parser {
         }
 
         error!(
-            self.lexer.line,
-            self.lexer.column,
+            &self.lexer,
             "Couldn't parse expression",
             format!("... {:?} ...", buffer),
             "Whatever this meant to be..."
@@ -468,8 +470,7 @@ impl Parser {
 
             if stop_token.is_none() {
                 error!(
-                    self.lexer.line,
-                    self.lexer.column,
+                    &self.lexer,
                     "Unexpected end of file.",
                     "( ...",
                     "Expected a value or expression here or closing parenthesis, but got nothing instead."
@@ -559,8 +560,7 @@ impl Parser {
 
             if stop_token.is_none() {
                 error!(
-                    self.lexer.line,
-                    self.lexer.column,
+                    &self.lexer,
                     "Unexpected end of file.",
                     "{{ ...",
                     "Expected a key or closing bracket, but got nothing instead."
@@ -581,8 +581,7 @@ impl Parser {
                             }
                         } else {
                             error!(
-                                self.lexer.line,
-                                self.lexer.column,
+                                &self.lexer,
                                 "Key can't be used as value, expected an identifier (variable) instead.",
                                 format!("{{...{:?}...}}", key),
                                 "this should be an identifier."
@@ -595,8 +594,7 @@ impl Parser {
                         keys.push(key);
                         values.push(value);
 
-                        if let Some(TokenKind::R_BRACKET) = self.stopped_at
-                        {
+                        if let Some(TokenKind::R_BRACKET) = self.stopped_at {
                             break;
                         }
                     }
@@ -621,27 +619,16 @@ impl Parser {
         }
     }
 
-    /// Parse a unary operator expression.
-    /// Should be called after encountering an bitwise op or negation token.
-    fn parse_unaryop(&mut self, operator: Token) -> Expr {
-        let expr = self.parse_expr(None);
-        Expr::UnaryOp {
-            op: operator.value,
-            expr: Box::new(expr),
-        }
-    }
-
     fn parse_value_token(&self, token: &Token) -> Expr {
         match token.kind {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),
             TokenKind::STRING => Expr::Str(token.value.clone()),
             TokenKind::IDENTIFIER => Expr::Identifier(token.value.clone()),
             _ => error!(
-                    token.line,
-                    token.column,
-                    "Can't parse token to value.",
-                    format!("Token: {:?}", token),
-                    "Expected a value token here."
+                &self.lexer,
+                "Can't parse token to value.",
+                format!("Token: {:?}", token),
+                "Expected a value token here."
             ),
         }
     }
@@ -659,8 +646,7 @@ impl Parser {
             if expr != *expr_type {
                 // <- This line right here
                 error!(
-                    self.lexer.line,
-                    self.lexer.column,
+                    &self.lexer,
                     format!("Expected an expression of type {:?}.", expr_type),
                     format!("... {:?}", expr)
                 );
@@ -674,12 +660,11 @@ impl Parser {
     /// Get an expression of type `expr_type` from the token stream. If not found, raise an error.
     /// `stop_at` is a tuple of token types that should stop the expression parsing.
     fn get_expr(&mut self, expr_type: &Expr, stop_at: Option<&[TokenKind]>) -> Expr {
-       let expr = self.get_optional_expr(&expr_type, stop_at);
+        let expr = self.get_optional_expr(&expr_type, stop_at);
 
         if expr.is_none() {
             error!(
-                self.lexer.line,
-                self.lexer.column,
+                &self.lexer,
                 format!(
                     "Expected an expression of type {:?}.\n Found: {:?}",
                     expr_type, expr
@@ -699,8 +684,7 @@ impl Parser {
     fn parse_assingment(&mut self) -> Stmt {
         if self.ast.current_scope.borrow().is_empty() {
             error!(
-                self.lexer.line,
-                self.lexer.column,
+                &self.lexer,
                 "Expected an identifier before assingment operator.",
                 format!("... = ..."),
                 " ^^^ - This is not an identifier or not one present."
@@ -721,8 +705,7 @@ impl Parser {
             };
         } else {
             error!(
-                self.lexer.line,
-                self.lexer.column,
+                &self.lexer,
                 "Expected an identifier before assingment operator.",
                 format!("{:?} = {:?}", ident, value),
                 " ^^^ - This is not an identifier."
