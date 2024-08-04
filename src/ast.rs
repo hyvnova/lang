@@ -58,7 +58,14 @@ pub enum Expr {
 
     /// Alias for something
     /// as {expr}
-    Alias(Box<Expr>) 
+    Alias(Box<Expr>),
+    
+    /// Range 
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.

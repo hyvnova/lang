@@ -1,11 +1,1 @@
-#[python]
-print({"a":1})
-class X:
-    def __init__(self):
-        print('yayy')
-
-#[endpython]
-a = 1, 2 3
-b = X()
-
-{a : 2}
+1..2

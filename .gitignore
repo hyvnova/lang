@@ -1,3 +1,4 @@
 /target
 /lang-python
-.vscode
+/.vscode
+/.github

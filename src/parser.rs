@@ -1,9 +1,8 @@
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
-use crate::{
+use crate::{error, 
     ast::{Expr, Node, Stmt, AST},
-    lexer::{self, Lexer, Token, TokenKind},
-    log_utils::error,
+    lexer::{Lexer, Token, TokenKind},
 };
 
 /// Box-It, bit!
@@ -157,13 +156,11 @@ impl Parser {
                     let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![L_PARENT]);
 
                     if self.stopped_at.take().is_none() {
-                        error(
-                            &[
-                                "Expected a parenthesis after function name.".to_string(),
-                                format!("def {:?} (...", name),
-                            ],
-                            self.lexer.line,
+                        error!(
+                            self.lexer.line, 
                             self.lexer.column,
+                            "Expected a parenthesis after function name.",
+                            format!("def {:?} (...", name)
                         );
                     }
 
@@ -194,16 +191,14 @@ impl Parser {
                 // * From import
                 // `from {expr} import {expr}[as {expr}{; or new_line}`]
                 TokenKind::FROM => {
-                    let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![IMPORT]);
+                   let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![IMPORT]);
 
                     if self.stopped_at.is_none() {
-                        error(
-                            &[
-                                "Expected 'import' after 'from'.".to_string(),
-                                format!("from {:?} ...", name),
-                            ],
+                        error!(
                             self.lexer.line,
                             self.lexer.column,
+                            "Expected 'import' after 'from'.".to_string(),
+                            format!("from {:?} ...", name)
                         );
                     }
 
@@ -268,6 +263,38 @@ impl Parser {
             }
 
             match token.kind {
+                // Range 
+                // {start: expr}..{end: expr} (exclusive)
+                // {start: expr}..={end: expr} (inclusive)
+                TokenKind::D_DOT => {
+                    
+                    // Get start of the range, if no start is provided, it's 0
+                    let start = if buffer.is_empty() {
+                        Expr::Number("0".to_string())
+                    } else {
+                        buffer.pop().unwrap()
+                    };
+                    
+                    // if next token is "="
+                    let mut inclusive: bool = false;
+                    if let Some(Token { kind: TokenKind::ASSIGN, .. }) = self.peek_token() {
+                        self.next_token(); // Consume the "="
+                        inclusive = true;
+                    } 
+                    
+                    let end = self.parse_expr(Some(stop_at));
+                    
+                    buffer.push(
+                        Expr::Range {
+                            start: bit!(start),
+                            end: bit!(end),
+                            inclusive,
+                        }
+                    );
+
+                    continue;
+                }
+                
                 TokenKind::L_PARENT => {
                     let expr = self.parse_paren();
                     buffer.push(expr);
@@ -305,14 +332,12 @@ impl Parser {
                 TokenKind::DOT => {
                     // If no previous expr, no left hand value
                     if buffer.is_empty() {
-                        error(
-                            &[
-                                "Expected an expression before operator.".to_string(),
-                                format!("{:?} ...", token),
-                                "^^^ -- Expected something as: object.property".to_string(),
-                            ],
+                        error!(
                             self.lexer.line,
                             self.lexer.column,
+                            "Expected an expression before operator.".to_string(),
+                            format!("{:?} ...", token),
+                            "^^^ -- Expected something as: object.property".to_string()
                         );
                     }
 
@@ -346,14 +371,12 @@ impl Parser {
                             };
                         }
 
-                        error(
-                            &[
-                                "Expected an expression before operator.".to_string(),
-                                format!("{:?} ...", token),
-                            ],
-                            self.lexer.line,
-                            self.lexer.column,
-                        );
+                        // error!(
+                        //         "Expected an expression before operator.".to_string(),
+                        //         ("{:?} ...", token),
+                        //     self.lexer.line,
+                        //     self.lexer.column,
+                        // );
                     }
 
                     let binop = self.parse_binop(buffer.pop().unwrap(), token, Some(stop_at));
@@ -417,14 +440,12 @@ impl Parser {
             return Expr::Sequence(buffer);
         }
 
-        error(
-            &[
-                "Couldn't parse expression".to_string(),
-                format!("... {:?} ...", buffer),
-                "Whatever this meant to be...".to_string(),
-            ],
+        error!(
             self.lexer.line,
             self.lexer.column,
+            "Couldn't parse expression",
+            format!("... {:?} ...", buffer),
+            "Whatever this meant to be..."
         )
     }
 
@@ -446,14 +467,12 @@ impl Parser {
             let stop_token = self.stopped_at.take();
 
             if stop_token.is_none() {
-                error(
-                    &[
-                        "Unexpected end of file.".to_string(),
-                        "( ...".to_string(),
-                        "Expected a value or expression here or closing parenthesis, but got nothing instead.".to_string(),
-                    ],
+                error!(
                     self.lexer.line,
                     self.lexer.column,
+                    "Unexpected end of file.",
+                    "( ...",
+                    "Expected a value or expression here or closing parenthesis, but got nothing instead."
                 );
             }
 
@@ -539,14 +558,12 @@ impl Parser {
             let stop_token = self.stopped_at.take();
 
             if stop_token.is_none() {
-                error(
-                    &[
-                        "Unexpected end of file.".to_string(),
-                        "{{ ...".to_string(),
-                        "Expected a key or closing bracket, but got nothing instead.".to_string(),
-                    ],
+                error!(
                     self.lexer.line,
                     self.lexer.column,
+                    "Unexpected end of file.",
+                    "{{ ...",
+                    "Expected a key or closing bracket, but got nothing instead."
                 );
             }
 
@@ -563,14 +580,12 @@ impl Parser {
                                 break;
                             }
                         } else {
-                            error(
-                                &[
-                                    "Key can't be used as value, expected an identifier (variable) instead.".to_string(),
-                                    format!("{{...{:?}...}}", key),
-                                    "this should be an identifier.".to_string(),
-                                ],
+                            error!(
                                 self.lexer.line,
                                 self.lexer.column,
+                                "Key can't be used as value, expected an identifier (variable) instead.",
+                                format!("{{...{:?}...}}", key),
+                                "this should be an identifier."
                             );
                         }
                     }
@@ -621,14 +636,12 @@ impl Parser {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),
             TokenKind::STRING => Expr::Str(token.value.clone()),
             TokenKind::IDENTIFIER => Expr::Identifier(token.value.clone()),
-            _ => error(
-                &[
-                    "Can't parse token to value.".to_string(),
+            _ => error!(
+                    token.line,
+                    token.column,
+                    "Can't parse token to value.",
                     format!("Token: {:?}", token),
-                    "Expected a value token here.".to_string(),
-                ],
-                token.line,
-                token.column,
+                    "Expected a value token here."
             ),
         }
     }
@@ -645,13 +658,11 @@ impl Parser {
         if expr == Expr::Empty {
             if expr != *expr_type {
                 // <- This line right here
-                error(
-                    &[
-                        format!("Expected an expression of type {:?}.", expr_type),
-                        format!("... {:?}", expr),
-                    ],
+                error!(
                     self.lexer.line,
                     self.lexer.column,
+                    format!("Expected an expression of type {:?}.", expr_type),
+                    format!("... {:?}", expr)
                 );
             }
 
@@ -663,16 +674,16 @@ impl Parser {
     /// Get an expression of type `expr_type` from the token stream. If not found, raise an error.
     /// `stop_at` is a tuple of token types that should stop the expression parsing.
     fn get_expr(&mut self, expr_type: &Expr, stop_at: Option<&[TokenKind]>) -> Expr {
-        let expr = self.get_optional_expr(&expr_type, stop_at);
+       let expr = self.get_optional_expr(&expr_type, stop_at);
 
         if expr.is_none() {
-            error(
-                &[format!(
-                    "Expected an expression of type {:?}.\n Found: {:?}",
-                    expr_type, expr
-                )],
+            error!(
                 self.lexer.line,
                 self.lexer.column,
+                format!(
+                    "Expected an expression of type {:?}.\n Found: {:?}",
+                    expr_type, expr
+                )
             );
         }
 
@@ -687,14 +698,12 @@ impl Parser {
     /// - `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
     fn parse_assingment(&mut self) -> Stmt {
         if self.ast.current_scope.borrow().is_empty() {
-            error(
-                &[
-                    "Expected an identifier before assingment operator.".to_string(),
-                    format!("... = ..."),
-                    " ^^^ - This is not an identifier or not one present.".to_string(),
-                ],
+            error!(
                 self.lexer.line,
                 self.lexer.column,
+                "Expected an identifier before assingment operator.",
+                format!("... = ..."),
+                " ^^^ - This is not an identifier or not one present."
             );
         }
 
@@ -711,14 +720,12 @@ impl Parser {
                 values: vec![value],
             };
         } else {
-            error(
-                &[
-                    "Expected an identifier before assingment operator.".to_string(),
-                    format!("{:?} = {:?}", ident, value),
-                    " ^^^ - This is not an identifier.".to_string(),
-                ],
+            error!(
                 self.lexer.line,
                 self.lexer.column,
+                "Expected an identifier before assingment operator.",
+                format!("{:?} = {:?}", ident, value),
+                " ^^^ - This is not an identifier."
             );
         }
     }

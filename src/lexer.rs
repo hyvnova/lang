@@ -1,6 +1,6 @@
 use phf::phf_map;
 
-use crate::log_utils::error;
+use crate::log_utils::log_error;
 use std::{borrow::Borrow, path::PathBuf};
 
 #[derive(Debug, Clone, Copy)]
@@ -87,6 +87,7 @@ pub enum TokenKind {
     SEMICOLON, // ;
     COLON,     // :
     COMMA,     // ,
+    D_DOT,      // .. (double dot - range operator)
     DOT,       // .
     HASH,      // #
     AT,        // @
@@ -214,7 +215,7 @@ impl Lexer {
                 .count()
                 > 1
             {
-                error(
+                log_error(
                     &["Invalid number".to_string()],
                     self.line,
                     self.current_char_index,
@@ -307,6 +308,14 @@ impl Lexer {
             ';' => return TokenKind::SEMICOLON,
             ':' => return TokenKind::COLON,
             ',' => return TokenKind::COMMA,
+                
+            '.' if self.peek_next_char() == Some('.') => {
+                self.current_char_index += 1; // Move past .
+                self.column += 1;
+                self.current_token_value = Some("..".to_string());
+                return TokenKind::D_DOT;
+            }
+            
             '.' => return TokenKind::DOT,
             '#' => {
                 // ! Special keywords
@@ -379,7 +388,7 @@ impl Lexer {
             // Reserved for syntax
             '`' => return TokenKind::BACK_TICK,
 
-            _ => error(
+            _ => log_error(
                 &[format!("Unexpected character: {}", ch)],
                 self.line,
                 self.current_char_index,
