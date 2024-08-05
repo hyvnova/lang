@@ -1,7 +1,7 @@
 use phf::phf_map;
 
 use crate::error;
-use std::{borrow::Borrow, path::PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]

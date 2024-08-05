@@ -1,7 +1,7 @@
 /// Transpile to Python
 /// This mode implements the Transpile trait for the AST Node, Stmt and Expr
 /// It converts the AST to a string representation of the code in Python
-use crate::ast::{self, Expr, Node, Stmt, AST};
+use crate::ast::{Expr, Node, Stmt, AST};
 use crate::transpilers::Transpile;
 
 impl Transpile for Expr {
@@ -9,6 +9,7 @@ impl Transpile for Expr {
         use Expr::*;
         match self {
             Empty => "".to_string(),
+            Newline => "\n".to_string(),
 
             Number(n) => n.to_string(),
             Identifier(ident) => ident.to_string(),

@@ -1,8 +1,8 @@
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
 use crate::{
+    error, log,
     ast::{Expr, Node, Stmt, AST},
-    error,
     lexer::{Lexer, Token, TokenKind},
 };
 
@@ -95,7 +95,7 @@ impl Parser {
     pub fn parse(&mut self) -> &AST {
         // * Parse start
         while let Some(token) = self.peek_token() {
-            println!("[parse] {:?}", token);
+            log!("parse", "{:?}", token);
 
             // * Single line commments
             if token.kind == TokenKind::HASH {
@@ -109,6 +109,7 @@ impl Parser {
 
             // New lines
             if token.kind == TokenKind::NEW_LINE {
+                self.ast.add(Node::Expr(Expr::Newline));
                 self.next_token();
                 continue;
             }
@@ -119,11 +120,11 @@ impl Parser {
             } else if Lexer::is_expression_token(&token) {
                 let expr: Expr = self.parse_expr(None);
 
-                println!("+ [parse] Adding expression to AST: {:?}", expr);
+                log!("+ parse", "Adding expression to AST: {:?}", expr);
 
                 self.ast.add(Node::Expr(expr));
             } else {
-                eprintln!("( ! ) [parse] Unknown token: {:?}", token);
+                log!("! parse", "Unknown token: {:?}", token);
             }
         }
 
@@ -134,7 +135,7 @@ impl Parser {
     /// Statement token should be set as REMAINDER_TOKEN before calling this function.
     /// Captures the statement from token to the next semicolon.
     fn parse_statement(&mut self) -> Stmt {
-        println!("[parse_statement]");
+        log!("parse_statement", "");
 
         while let Some(token) = self.next_token() {
             if token.kind == TokenKind::SEMICOLON {
@@ -167,7 +168,7 @@ impl Parser {
                     let args = self.parse_paren();
                     let body = self.parse_block();
 
-                    println!("[parse_statement/DEF] {:?}( {:?} ) {:?} ", name, args, body);
+                    log!("parse statement / DEF", "{:?}( {:?} ) {:?} ", name, args, body);
 
                     return Stmt::FunctionDef { name, args, body };
                 }
@@ -205,7 +206,7 @@ impl Parser {
                         tkarr![SEMICOLON, NEW_LINE, AS],
                     );
 
-                    if let Some(Token) = self.stopped_at {
+                    if let Some(_) = self.stopped_at {
                         let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
                         return Stmt::From(name, thing, Some(alias));
                     }
@@ -242,13 +243,18 @@ impl Parser {
 
         // * Capture all tokens that make up the expression
         while let Some(token) = self.next_token() {
-            println!(
-                "[parse_expr] {:?} stop_at={:?} buffer={:?}",
+            log!(
+                "parse expr", "{:?} stop_at={:?} buffer={:?}",
                 token, stop_at, buffer
             );
 
             // If should stop
             if stop_at.contains(&token.kind) {
+
+                if token.kind == TokenKind::NEW_LINE {
+                    self.ast.add(Node::Expr(Expr::Newline));
+                }
+
                 self.stopped_at = Some(token.kind);
                 return self.parse_expr_from_buffer(buffer);
             }
@@ -352,7 +358,7 @@ impl Parser {
                 // * Unary Operator
                 // {op}{expr}
                 _ if Lexer::is_bitwise_operator(&token) => {
-                    println!("Unary Operator: {:?}", token);
+                    log!("Unary Operator", "{:?}", token);
                     let expr = self.parse_expr(Some(stop_at));
 
                     buffer.push(Expr::UnaryOp {
@@ -409,7 +415,7 @@ impl Parser {
     /// Used to "condence" expressions that are made up of multiple expressions.
     /// Ex. (1 + 2) * (2 / 2) -> BinOp(BinOp(1, '+', 2), '*', BinOp(2, '/', 2))
     fn parse_expr_from_buffer(&mut self, buffer: Vec<Expr>) -> Expr {
-        println!("[parse_expr_from_buffer] buffer={:?}", buffer);
+        log!("parse_expr_from_buffer", "buffer={:?}", buffer);
 
         if buffer.is_empty() {
             return Expr::Empty;
@@ -462,7 +468,7 @@ impl Parser {
     fn parse_paren(&mut self) -> Expr {
         let mut buffer: Vec<Expr> = Vec::new();
 
-        println!("[parse_paren]");
+        log!("parse_paren");
 
         loop {
             let expr = self.parse_expr(tkarr![R_PARENT, COMMA]);
@@ -477,7 +483,7 @@ impl Parser {
                 );
             }
 
-            println!("[parse_paren] expr={:?} stop_token={:?}", expr, stop_token);
+            log!("parse_paren]", "expr={:?} stop_token={:?}", expr, stop_token);
             buffer.push(expr);
 
             match stop_token.unwrap() {
@@ -506,7 +512,7 @@ impl Parser {
     /// }
     /// ```
     fn parse_block(&mut self) -> Expr {
-        println!("[parse_block]");
+        log!("parse_block");
 
         self.ast.current_scope = Rc::new(RefCell::new(Vec::new()));
 
@@ -521,7 +527,7 @@ impl Parser {
                 self.ast.add(Node::Stmt(stmt));
             } else if Lexer::is_expression_token(&token) {
                 let expr = self.parse_expr(tkarr![R_BRACKET]);
-                println!("+ [parse_block] expr={:?}", expr);
+                log!("+ parse_block", "expr={:?}", expr);
 
                 self.ast.add(Node::Expr(expr));
 
@@ -533,7 +539,7 @@ impl Parser {
             }
         }
         let block = Expr::Block(self.ast.current_scope.borrow().clone());
-        println!("[end parse_block] {:?}", block);
+        log!("end parse_block", "{:?}", block);
 
         self.ast.current_scope = self.ast.children.clone();
         block
@@ -548,7 +554,7 @@ impl Parser {
         let mut keys = Vec::new();
         let mut values = Vec::new();
 
-        println!("[parse_dict]");
+        log!("parse_dict");
 
         loop {
             let key = self.get_optional_expr(

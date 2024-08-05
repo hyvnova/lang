@@ -4,6 +4,7 @@
 #[derive(Debug, Clone)]
 pub enum Expr {
     Empty,
+    Newline,
 
     Number(String),
     Identifier(String),
