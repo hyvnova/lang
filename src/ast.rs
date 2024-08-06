@@ -77,6 +77,8 @@ impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
         use Expr::*;
         match (self, other) {
+            (Empty, Empty) => true,
+            (Newline, Newline) => true,
             (Number(_), Number(_)) => true,
             (Identifier(_), Identifier(_)) => true,
             (Str(_), Str(_)) => true,

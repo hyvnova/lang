@@ -259,6 +259,11 @@ impl Parser {
                 return self.parse_expr_from_buffer(buffer);
             }
 
+            // Skip newlines that ar not in stop_at, since they are not part of the expression
+            if token.kind == TokenKind::NEW_LINE {
+                continue;
+            }
+
             // If it's not an expression token
             if !Lexer::is_expression_token(&token) {
                 self.put_back(token); // Put back the token that stopped the expression
@@ -408,6 +413,7 @@ impl Parser {
             continue;
         }
 
+        log!("end parse_expr", "{:?} stop_at={:?} stopped_at={:?}", buffer, stop_at, self.stopped_at);
         self.parse_expr_from_buffer(buffer)
     }
 
@@ -415,7 +421,7 @@ impl Parser {
     /// Used to "condence" expressions that are made up of multiple expressions.
     /// Ex. (1 + 2) * (2 / 2) -> BinOp(BinOp(1, '+', 2), '*', BinOp(2, '/', 2))
     fn parse_expr_from_buffer(&mut self, buffer: Vec<Expr>) -> Expr {
-        log!("parse_expr_from_buffer", "buffer={:?}", buffer);
+        log!("parse_expr_from_buffer", "buffer={:?}, stop_token={:?}", buffer, self.stopped_at);
 
         if buffer.is_empty() {
             return Expr::Empty;
@@ -557,60 +563,58 @@ impl Parser {
         log!("parse_dict");
 
         loop {
-            let key = self.get_optional_expr(
-                &Expr::Identifier(String::new()),
-                tkarr![COMMA, R_BRACKET, COLON],
-            );
+            let key = self.parse_expr(tkarr![COLON, COMMA, R_BRACKET]);
 
-            let stop_token = self.stopped_at.take();
-
-            if stop_token.is_none() {
-                error!(
+            let stop_token = match self.stopped_at.take() {
+                Some(t) => t,
+                None => error!(
                     &self.lexer,
                     "Unexpected end of file.",
                     "{{ ...",
                     "Expected a key or closing bracket, but got nothing instead."
-                );
+                )
+            };
+
+            log!("parse_dict", "key={:?} stop_token={:?}", key, stop_token);
+
+            // No key, end of dict
+            if key == Expr::Empty {
+                break;
             }
 
-            let stop_token = stop_token.unwrap();
+            match stop_token {
+                TokenKind::COMMA | TokenKind::R_BRACKET => {
+                    if let Expr::Identifier(_) = key {
+                        keys.push(key.clone());
+                        values.push(key);
 
-            if let Some(key) = key {
-                match stop_token {
-                    TokenKind::COMMA | TokenKind::R_BRACKET => {
-                        if let Expr::Identifier(_) = key {
-                            keys.push(key.clone());
-                            values.push(key);
-
-                            if stop_token == TokenKind::R_BRACKET {
-                                break;
-                            }
-                        } else {
-                            error!(
-                                &self.lexer,
-                                "Key can't be used as value, expected an identifier (variable) instead.",
-                                format!("{{...{:?}...}}", key),
-                                "this should be an identifier."
-                            );
-                        }
-                    }
-                    TokenKind::COLON => {
-                        let value = self.parse_expr(tkarr![COMMA, R_BRACKET]);
-
-                        keys.push(key);
-                        values.push(value);
-
-                        if let Some(TokenKind::R_BRACKET) = self.stopped_at {
+                        if stop_token == TokenKind::R_BRACKET {
                             break;
                         }
+                    } else {
+                        error!(
+                            &self.lexer,
+                            "Key can't be used as value, expected an identifier (variable) instead.",
+                            format!("{{...{:?}...}}", key),
+                            "this should be an identifier."
+                        );
                     }
-                    _ => break,
                 }
-            } else {
-                break;
+                TokenKind::COLON => {
+                    let value = self.parse_expr(tkarr![COMMA, R_BRACKET]);
+                    log!("parse_dict", "key={:?} value={:?}", key, value);
+                    keys.push(key);
+                    values.push(value);
+
+                    if let Some(TokenKind::R_BRACKET) = self.stopped_at {
+                        break;
+                    }
+                }
+                _ => break,
             }
         }
 
+        log!("end parse_dict", "keys={:?} values={:?}", keys, values);
         Expr::Dict { keys, values }
     }
 
@@ -626,6 +630,7 @@ impl Parser {
     }
 
     fn parse_value_token(&self, token: &Token) -> Expr {
+        log!("parse_value_token", "{:?}", token);
         match token.kind {
             TokenKind::NUMBER => Expr::Number(token.value.clone()),
             TokenKind::STRING => Expr::Str(token.value.clone()),
@@ -646,21 +651,17 @@ impl Parser {
         expr_type: &Expr,
         stop_at: Option<&[TokenKind]>,
     ) -> Option<Expr> {
+
         let expr = self.parse_expr(stop_at);
 
-        if expr == Expr::Empty {
-            if expr != *expr_type {
-                // <- This line right here
-                error!(
-                    &self.lexer,
-                    format!("Expected an expression of type {:?}.", expr_type),
-                    format!("... {:?}", expr)
-                );
-            }
-
-            return Some(expr);
+        if expr == Expr::Empty || expr != *expr_type  {
+            error!(
+                &self.lexer,
+                format!("Expected an expression of type {:?}.", expr_type),
+                format!("... {:?}", expr)
+            );
         }
-        None
+        return Some(expr);
     }
 
     /// Get an expression of type `expr_type` from the token stream. If not found, raise an error.

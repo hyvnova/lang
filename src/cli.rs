@@ -57,7 +57,6 @@ pub fn main() {
 }
 
 fn run_lang(mut parser: LangParser, transpiler: String) {
-
     // * Parse file
     let ast = parser.parse();
 

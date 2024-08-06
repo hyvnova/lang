@@ -8,4 +8,16 @@ clap = { version = "4.5.13", features = ["derive"] }
 colored = "2.1.0"
 phf = { version = "0.11.2", features = ["macros"] }
 rand = "0.8.5"
-syntect = "5.2.0"
+syntect = { version = "5.2.0", default-features = true }
+
+[build]
+rustflags = ["-Z", "threads=8"]
+rustc-wrapper = "C:\\Users\\theyu\\scoop\\apps\\sccache\\0.8.1\\sccache.exe"
+
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.dev]
+debug = 0
+strip = "debuginfo"
