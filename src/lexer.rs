@@ -33,12 +33,12 @@ pub enum TokenKind {
     R_PARENT,
 
     //   Brackets
-    L_BRACKET,
-    R_BRACKET,
+    L_BRACKET,  // {
+    R_BRACKET,  // }
 
     //   Square brackets
-    L_SQUARE_BRACKET,
-    R_SQUARE_BRACKET,
+    L_SQUARE_BRACKET, // [
+    R_SQUARE_BRACKET, // ]
 
     //   Values
     _value_start, // index to start of value tokens
@@ -79,7 +79,7 @@ pub enum TokenKind {
 
     NEG, // !
     AND, // &
-    OR,  // |
+        // | OR is PIPE 
     XOR, // ^
     NOT, // ~
 
@@ -93,6 +93,15 @@ pub enum TokenKind {
     DOT,       // .
     HASH,      // #
     AT,        // @
+
+    // pipes... 
+    PIPE,      // |
+    PIPE_RIGHT, // |>
+    PIPE_LEFT,  // <|
+
+    // Arrows
+    L_ARROW, // <-
+    R_ARROW, // ->
 
     _expr_end, // index to end of expression tokens
 }
@@ -226,6 +235,37 @@ impl Lexer {
         self.current_token_value = Some(ch.to_string());
 
         match ch {
+            // Arrows
+            '<' if self.peek_next_char() == Some('-') => {
+                self.current_char_index += 1; // Move past -
+                self.current_token_value = Some("<-".to_string());
+                return TokenKind::L_ARROW;
+            }
+
+            // * Pipes
+            // Pipe right (|>)
+            '|' if self.peek_next_char() == Some('>') => {
+                self.current_char_index += 1; // Move past >
+                self.current_token_value = Some("|>".to_string());
+                return TokenKind::PIPE_RIGHT;
+            }
+
+            // Pipe left (<|)
+            '<' if self.peek_next_char() == Some('|') => {
+                self.current_char_index += 1; // Move past |
+                self.current_token_value = Some("<|".to_string());
+                return TokenKind::PIPE_LEFT;
+            }
+
+            // Pipe
+            '|' => return TokenKind::PIPE,
+
+            '-' if self.peek_next_char() == Some('>') => {
+                self.current_char_index += 1; // Move past >
+                self.current_token_value = Some("->".to_string());
+                return TokenKind::R_ARROW;
+            }
+
             // Comparison
             '=' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
@@ -257,7 +297,6 @@ impl Lexer {
 
             // Bitwise
             '&' => return TokenKind::AND,
-            '|' => return TokenKind::OR,
             '^' => return TokenKind::XOR,
             '~' => return TokenKind::NOT,
 
@@ -344,6 +383,11 @@ impl Lexer {
                             }
                             python_code.push(ch.unwrap());
                         }
+
+                        // Add lines to line count
+                        self.line += python_code.matches('\n').count();
+                        self.column = 0;
+
                         self.current_token_value = Some(python_code);
                         return TokenKind::PYTHON;
                     }
@@ -360,14 +404,16 @@ impl Lexer {
             '@' => return TokenKind::AT,
 
             // Quotes
-            '"' => {
-                self.capture(' ', |char| char != '"');
-                self.current_char_index += 1; // Move past "
+            _ if ch == '"' || ch == '\'' => {
+
+                // This sucks...  but I don't want to modify capture to take a closure that returns a bool
+                if  ch == '\'' {
+                    self.capture(ch, |char| char != '\'');
+                } else {
+                    self.capture(ch, |char| char != '"');
+                }
+                self.current_char_index += 1; // Move past quote
                 self.column += 1;
-                return TokenKind::STRING;
-            }
-            '\'' => {
-                self.capture(' ', |char| char != '\'');
                 return TokenKind::STRING;
             }
 

@@ -2,9 +2,9 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO 
-- Dicts <--
-- Ranges <-- 
-- Signal <-- 
+- Signal  
+- Desctructuring <-- 
+- [x] Distribute & Iter Distribute 
 
 # Syntax
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)

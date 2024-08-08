@@ -79,14 +79,68 @@ impl Transpile for Expr {
             }
 
             Alias(name) => format!("as {}", name.transpile()),
-            
-            Range { start, end, inclusive } => {
+
+            Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 format!(
                     "range({}, {}{})",
                     start.transpile(),
                     end.transpile(),
                     if *inclusive { "+1" } else { "" }
                 )
+            }
+
+            // * Distribution
+            // Distribution pipes args into functions
+            // So, `| a, b -> fn1, fn1;` -> `fn1(a, b); fn2(a, b);`
+            Distribution { args, recipients } => {
+                let mut code = String::new();
+
+                let args_str = args
+                    .iter()
+                    .map(|arg| arg.transpile())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+
+                for func in recipients.iter() {
+                    code.push_str(&format!("{}({});\n", func.transpile(), args_str));
+                }
+
+                code
+            }
+
+            // * Iterative Distribution
+            // Iterative Distribution pipes iteration of args into functions
+            // So, `|> nums, chars -> fn1, fn1;` -> for num, char in zip(nums, chars): fn1(num, char); fn2(num, char);
+            // We iterate over the args and pass them to the functions
+            IterDistribution { args, recipients } => {
+                let mut code = String::new();
+
+                let args_str = args
+                    .iter()
+                    .map(|arg| {
+
+                        // Some python magic here -- 
+                        // If values is not iterable in python we will put it inside a tuple
+                        let val = arg.transpile();
+                        format!("({} if hasattr({}, '__iter__') else itertools.cycle([{}]))", val, val, val)
+
+                    })
+                    .collect::<Vec<String>>()
+                    .join(", ");
+
+                // Import itertools, to use cycle
+                code.push_str("import itertools\n");
+
+                code.push_str(format!("for _lang_args in zip({}):\n", args_str).as_str());
+                for func in recipients.iter() {
+                    code.push_str(&format!("\t{}(*_lang_args);\n", func.transpile()));
+                }
+
+                code
             }
         }
     }

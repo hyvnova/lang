@@ -68,6 +68,20 @@ pub enum Expr {
         inclusive: bool,
     },
 
+    /// Distribution
+    /// | {sequence} -> {recipients};
+    Distribution {
+        args: Vec<Expr>, 
+        recipients: Vec<Expr>,
+    },
+
+    /// Iterative Distribution
+    /// |> {sequence} -> {recipients};
+    IterDistribution {
+        args: Vec<Expr>,
+        recipients: Vec<Expr>,
+    },
+
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.

@@ -271,7 +271,41 @@ impl Parser {
             }
 
             match token.kind {
-                // Range
+                // * Array
+                // [expr, expr, ...]
+                TokenKind::L_SQUARE_BRACKET => {
+                    let expr = self.parse_expr(tkarr![R_SQUARE_BRACKET]);
+
+                    if self.stopped_at.is_none() || self.stopped_at.unwrap() != TokenKind::R_SQUARE_BRACKET {
+                        error!(
+                            &self.lexer,
+                            "Expected a closing bracket after array.",
+                            format!("[{:?} ... <-- Expected \"]\" here", expr)
+                        );
+                    }
+
+                    buffer.push(expr);
+                    continue;
+                }
+
+                // * Distribution
+                // | {sequence} -> {sequence};
+                // |> {sequence} -> {sequence}
+                TokenKind::PIPE => {
+                    let expr = self.parse_distribution(false);
+                    buffer.push(expr);
+                    continue;
+                }
+
+                // * Iter distribution
+                // |> {sequence} -> {sequence}
+                TokenKind::PIPE_RIGHT => {
+                    let expr = self.parse_distribution(true);
+                    buffer.push(expr);
+                    continue;
+                }
+
+                // * Range
                 // {start: expr}..{end: expr} (exclusive)
                 // {start: expr}..={end: expr} (inclusive)
                 TokenKind::D_DOT => {
@@ -462,6 +496,66 @@ impl Parser {
             "Whatever this meant to be..."
         )
     }
+
+
+    /// Parse a distrubution expression.
+    /// Should be called when encountering a PIPE token.
+    /// | {sequence} -> {sequence};
+    /// |> {sequence} -> {sequence}
+    /// ---
+    /// * Distribution - Distribute PI and Coords into the Direction and Distance functions.
+    /// ```| PI, Coords -> Direction, Distance; ``````
+    /// * Iter distribution - Distribute a arguments as iterable 
+    /// ```|> inputs, outputs -> f1, f2;```  Iterate over inputs and outputs and distribute them into f1 and f2
+    fn parse_distribution(&mut self, is_iter: bool) -> Expr {
+        log!("parse_distribution");
+
+        let args_expr = self.parse_expr(tkarr![R_ARROW]);
+
+        if self.stopped_at.is_none() || self.stopped_at.unwrap() != TokenKind::R_ARROW {
+            error!(
+                &self.lexer,
+                "Expected an arrow after arguments when using distribution operator.",
+                format!("| {:?} ... <-- expected \"->\" here", args_expr)
+            );
+        }
+
+        let args: Vec<Expr> = match args_expr {
+            Expr::Sequence(seq) => seq,
+            _ => vec![args_expr],
+        };
+
+        let rec_expr = self.parse_expr(tkarr![SEMICOLON, NEW_LINE]);
+
+        if self.stopped_at.is_none() {
+            error!(
+                &self.lexer,
+                "Expected a semicolon or new line after recipients in distribution operator.",
+                format!("| {:?} -> {:?} ... <- Can't end like this must be \";\" or new line.", args, rec_expr)
+            );
+        }
+
+        let recipients: Vec<Expr> = match rec_expr {
+            Expr::Sequence(seq) => seq,
+            _ => vec![rec_expr],
+        };
+
+
+        log!("end parse_distribution", "args={:?} recipients={:?}", args, recipients);
+
+        if is_iter {
+            return Expr::IterDistribution {
+                args,
+                recipients
+            };
+        }
+        return Expr::Distribution {
+            args,
+            recipients,
+        };
+
+    }
+
 
     /// Parse a parenthesis expression, sequence or function call.
     /// Should be called when encountering a L_PAREN token.
