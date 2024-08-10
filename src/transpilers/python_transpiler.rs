@@ -2,7 +2,10 @@
 /// This mode implements the Transpile trait for the AST Node, Stmt and Expr
 /// It converts the AST to a string representation of the code in Python
 use crate::ast::{Expr, Node, Stmt, AST};
-use crate::transpilers::Transpile;
+
+trait Transpile {
+    fn transpile(&self) -> String;
+}
 
 impl Transpile for Expr {
     fn transpile(&self) -> String {
@@ -165,6 +168,20 @@ impl Transpile for Stmt {
                     code.push_str(" = ");
                     code.push_str(&values[i].transpile());
                     code.push_str("\n");
+                }
+
+                code
+            }
+
+            Deconstruction { identifiers, value } => {
+                let mut code = String::new();
+
+                let val_str = value.transpile();
+
+                for ident in identifiers.iter() {
+
+                    // {ident} = {dict}["{ident}"]
+                    code.push_str(format!("{0} = {1}[\"{0}\"];\n", ident.transpile(), val_str).as_str());
                 }
 
                 code

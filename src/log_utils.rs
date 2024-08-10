@@ -90,7 +90,7 @@ macro_rules! error {
 macro_rules! log {
     ($label:expr) => {{
         use colored::*;
-        let log_width = 50; // Adjust width as needed
+        let log_width = 25; // Adjust width as needed
 
         // Format and color the label
         let formatted_label = format!("[{}]", $label).bold().cyan();
@@ -103,7 +103,7 @@ macro_rules! log {
 
     ($label:expr, $($arg:tt)*) => {{
         use colored::*;
-        let log_width = 50; // Adjust width as needed
+        let log_width = 25; // Adjust width as needed
 
         // Format the message with the provided arguments
         let formatted_message = format!($($arg)*).green();
@@ -124,4 +124,15 @@ macro_rules! log {
 macro_rules! log {
     ($label:expr) => {};
     ($label:expr, $($arg:tt)*) => {};
+}
+
+
+
+pub fn add_line_numbers(source: &str) -> String {
+    source
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{:>4} | {}", i + 1, line))
+        .collect::<Vec<String>>()
+        .join("\n")
 }

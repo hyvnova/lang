@@ -782,6 +782,8 @@ impl Parser {
     /// - `{ident} = {expr};`
     /// * Multiple assingment statement.
     /// - `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
+    /// * Deconstruction
+    /// - `({ident}, {ident}, ...) = {expr}`
     fn parse_assingment(&mut self) -> Stmt {
         if self.ast.current_scope.borrow().is_empty() {
             error!(
@@ -804,10 +806,26 @@ impl Parser {
                 identifiers: vec![ident],
                 values: vec![value],
             };
-        } else {
+        } 
+        
+        // Deconstruction
+        else if ident == (Expr::Dict { keys: Vec::new(), values: Vec::new() }) {
+
+            // Unpack keys from ident
+            let keys = match ident {
+                Expr::Dict { keys, values: _ } => keys,
+                _ => unreachable!()
+            };
+
+            return Stmt::Deconstruction {
+                identifiers: keys,
+                value
+            };
+        }
+        else {
             error!(
                 &self.lexer,
-                "Expected an identifier before assingment operator.",
+                "Expected an identifier or keys before assingment operator.",
                 format!("{:?} = {:?}", ident, value),
                 " ^^^ - This is not an identifier."
             );

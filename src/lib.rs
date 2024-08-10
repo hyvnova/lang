@@ -9,4 +9,3 @@ pub mod ast;
 pub mod transpilers;
 
 pub mod log_utils;
-pub mod code_highlight;

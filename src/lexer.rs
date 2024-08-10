@@ -93,6 +93,7 @@ pub enum TokenKind {
     DOT,       // .
     HASH,      // #
     AT,        // @
+    DOLLAR_SING, // $
 
     // pipes... 
     PIPE,      // |
@@ -402,15 +403,16 @@ impl Lexer {
                 }
             }
             '@' => return TokenKind::AT,
+            '$' => return TokenKind::DOLLAR_SING,
 
-            // Quotes
+            // Quotes -- Strings
             _ if ch == '"' || ch == '\'' => {
 
                 // This sucks...  but I don't want to modify capture to take a closure that returns a bool
                 if  ch == '\'' {
-                    self.capture(ch, |char| char != '\'');
+                    self.capture(' ', |char| char != '\'');
                 } else {
-                    self.capture(ch, |char| char != '"');
+                    self.capture(' ', |char| char != '"');
                 }
                 self.current_char_index += 1; // Move past quote
                 self.column += 1;

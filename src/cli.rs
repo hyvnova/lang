@@ -1,4 +1,6 @@
-use crate::{code_highlight::highlight_code, parser::Parser as LangParser, transpilers, use_transpiler};
+use crate::{
+    log_utils::add_line_numbers, parser::Parser as LangParser, transpilers, use_transpiler,
+};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -13,7 +15,7 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run file 
+    /// Run file
     // ```shell
     // lang run <file: path> [tranpiler: str = "python"]
     // ```
@@ -45,9 +47,9 @@ pub fn main() {
 
     match args.command {
         Commands::Run { file, transpiler } => {
-            let parser = LangParser::from_path(file); 
+            let parser = LangParser::from_path(file);
             run_lang(parser, transpiler.unwrap());
-        },
+        }
 
         Commands::Eval { code, transpiler } => {
             let parser = LangParser::new(code);
@@ -60,11 +62,11 @@ fn run_lang(mut parser: LangParser, transpiler: String) {
     // * Parse file
     let ast = parser.parse();
 
-    // * Transpile 
+    // * Transpile
     let code = use_transpiler!(transpiler, ast);
 
     // * Print code
-    println!("{}", highlight_code(&transpiler, &code));
+    println!("{}", add_line_numbers(&code));
 
     // * Execute code
     // TODO: Add support for other languages, for now I won't bother.
@@ -72,5 +74,5 @@ fn run_lang(mut parser: LangParser, transpiler: String) {
         .arg("-c")
         .arg(&code)
         .spawn()
-        .expect("failed to execute process");    
+        .expect("failed to execute process");
 }

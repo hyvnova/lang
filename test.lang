@@ -1,17 +1,8 @@
-a = 1
-b = 2
+user = {
+    "name": "jonh",
+    "age": 18
+}
 
-#[python]
-def add(x, y):
-    print("add", x + 1, y + 2)
+{ name, age} = user
 
-def sub(x, y):
-    print("sub", x - 1, y - 2)
-
-#[endpython]
-
-
-| a, b -> add, sub;
-
-nums = [1, 2, 3, 4, 5]
-|> nums, a -> add, sub;
+print(name, age)

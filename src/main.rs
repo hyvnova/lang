@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
-use lang::code_highlight::highlight_code;
+use lang::log_utils::add_line_numbers;
 use lang::parser::Parser;
 use lang::transpilers::python_transpiler::transpile;
 
@@ -26,7 +26,7 @@ fn main() {
 
     println!("\n----------------------------- [transpile to python] ------------------------");
     let code = transpile(&ast);
-    println!("{}", highlight_code("python", &code));
+    println!("{}", add_line_numbers(&code));
     println!("-------------------------------[py output ]----------------------");
 
     // run the python code 

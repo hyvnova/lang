@@ -1,12 +1,10 @@
 /// ! All transpilers should be named as <language>_transpiler.rs
 /// * This is necessary becays the macro `use_transpiler!` uses the name of the transpiler to import it
 pub mod python_transpiler;
+// pub mod rust_transpiler; 
 
 /// Should be implement in Node, Stmt and Expr
 /// Used to convert the AST to a string representation of the code in the desired language 
-pub trait Transpile {
-    fn transpile(&self) -> String;
-}
 
 #[macro_export]
 /// Use a transpiler

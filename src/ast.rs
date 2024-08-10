@@ -81,7 +81,6 @@ pub enum Expr {
         args: Vec<Expr>,
         recipients: Vec<Expr>,
     },
-
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.
@@ -122,6 +121,13 @@ pub enum Stmt {
     Assign {
         identifiers: Vec<Expr>,
         values: Vec<Expr>,
+    },
+
+    /// Deconstruction
+    /// {a, b} = {expr} -> a = expr.a and b = expr.b
+    Deconstruction {
+        identifiers: Vec<Expr>,
+        value: Expr,
     },
 
     /// Represents a function declaration.
