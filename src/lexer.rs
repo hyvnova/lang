@@ -90,6 +90,10 @@ pub enum TokenKind {
     COLON,     // :
     COMMA,     // ,
     D_DOT,      // .. (double dot - range operator)
+
+    COMMENT,    // "//" (single line comment)
+    ML_COMMENT, // "/*"  (multi line comment start - ends with "*/")
+    
     DOT,       // .
     HASH,      // #
     AT,        // @
@@ -236,6 +240,46 @@ impl Lexer {
         self.current_token_value = Some(ch.to_string());
 
         match ch {
+            // Comments -- value of comment is the comment itself
+            '/' if self.peek_next_char() == Some('/') => {
+                self.next_char(); // Move past /
+                self.capture(' ', |char| char != '\n');
+                return TokenKind::COMMENT;
+            }
+
+            '/' if self.peek_next_char() == Some('*') => {
+                self.next_char(); // Move past *
+
+                let mut content = String::new();
+
+                loop {
+                    self.capture(' ', |char| char != '*'); // Capture until *, since multi line comments are closed with */
+
+                    // Match char that made capture stop
+                    match self.next_char() {
+                        Some('*') => {
+
+                            // If next char is /, then end of comment
+                            if let Some('/') = self.peek_next_char() {
+                                self.next_char(); // Move past /
+                                content.push_str(&self.current_token_value.as_ref().unwrap());
+                                break;
+
+                            // Otherwise, add the current value to content and continue capturing content
+                            } else {
+                                self.current_token_value.as_mut().unwrap().push('*'); // Add * to content since it was part of it
+                                content.push_str(&self.current_token_value.as_ref().unwrap());
+                            }
+                        }
+                        // If no more chars, break
+                        None => break,
+
+                        Some(_) => panic!("Unexpected character in multi line comment."),
+                    }
+                }
+                return TokenKind::ML_COMMENT;
+            }
+
             // Arrows
             '<' if self.peek_next_char() == Some('-') => {
                 self.current_char_index += 1; // Move past -

@@ -1,8 +1,6 @@
-user = {
-    "name": "jonh",
-    "age": 18
-}
 
-{ name, age} = user
-
-print(name, age)
+/* This is a comment??? 
+    wait wait
+    do we have multiline commnet?
+*/
+$meta_var 

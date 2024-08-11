@@ -13,6 +13,16 @@ impl Transpile for Expr {
         match self {
             Empty => "".to_string(),
             Newline => "\n".to_string(),
+            Comment(comment) => {
+                // Multiline comments
+                if comment.contains("\n") {
+                    comment.clone().lines().map(|line| format!("# {}\n", line)).collect()
+                // Single line comments
+                } else {
+                    format!("# {}\n", comment)
+                } 
+            }
+
 
             Number(n) => n.to_string(),
             Identifier(ident) => ident.to_string(),

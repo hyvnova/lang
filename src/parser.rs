@@ -1,9 +1,10 @@
 use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
 use crate::{
-    error, log,
     ast::{Expr, Node, Stmt, AST},
+    error,
     lexer::{Lexer, Token, TokenKind},
+    log,
 };
 
 /// Box-It, bit!
@@ -97,16 +98,6 @@ impl Parser {
         while let Some(token) = self.peek_token() {
             log!("parse", "{:?}", token);
 
-            // * Single line commments
-            if token.kind == TokenKind::HASH {
-                while let Some(token) = self.next_token() {
-                    if token.kind == TokenKind::NEW_LINE {
-                        break;
-                    }
-                }
-                continue; // Continue because token is now an unknown: new line or None
-            }
-
             // New lines
             if token.kind == TokenKind::NEW_LINE {
                 self.ast.add(Node::Expr(Expr::Newline));
@@ -168,7 +159,13 @@ impl Parser {
                     let args = self.parse_paren();
                     let body = self.parse_block();
 
-                    log!("parse statement / DEF", "{:?}( {:?} ) {:?} ", name, args, body);
+                    log!(
+                        "parse statement / DEF",
+                        "{:?}( {:?} ) {:?} ",
+                        name,
+                        args,
+                        body
+                    );
 
                     return Stmt::FunctionDef { name, args, body };
                 }
@@ -244,13 +241,15 @@ impl Parser {
         // * Capture all tokens that make up the expression
         while let Some(token) = self.next_token() {
             log!(
-                "parse expr", "{:?} stop_at={:?} buffer={:?}",
-                token, stop_at, buffer
+                "parse expr",
+                "{:?} stop_at={:?} buffer={:?}",
+                token,
+                stop_at,
+                buffer
             );
 
             // If should stop
             if stop_at.contains(&token.kind) {
-
                 if token.kind == TokenKind::NEW_LINE {
                     self.ast.add(Node::Expr(Expr::Newline));
                 }
@@ -271,12 +270,20 @@ impl Parser {
             }
 
             match token.kind {
+                // * Comments
+                TokenKind::COMMENT | TokenKind::ML_COMMENT => {
+                    self.ast.add(Node::Expr(Expr::Comment(token.value.clone())));
+                    continue;
+                }
+
                 // * Array
                 // [expr, expr, ...]
                 TokenKind::L_SQUARE_BRACKET => {
                     let expr = self.parse_expr(tkarr![R_SQUARE_BRACKET]);
 
-                    if self.stopped_at.is_none() || self.stopped_at.unwrap() != TokenKind::R_SQUARE_BRACKET {
+                    if self.stopped_at.is_none()
+                        || self.stopped_at.unwrap() != TokenKind::R_SQUARE_BRACKET
+                    {
                         error!(
                             &self.lexer,
                             "Expected a closing bracket after array.",
@@ -419,12 +426,12 @@ impl Parser {
                             };
                         }
 
-                        // error!(
-                        //         "Expected an expression before operator.".to_string(),
-                        //         ("{:?} ...", token),
-                        //     self.lexer.line,
-                        //     self.lexer.column,
-                        // );
+                        error!(
+                            &self.lexer,
+                            "Expected an expression before operator.",
+                            format!("<!> {} ...", token.value),
+                            "^^^ -- Expression missing here "
+                        );
                     }
 
                     let binop = self.parse_binop(buffer.pop().unwrap(), token, Some(stop_at));
@@ -447,7 +454,13 @@ impl Parser {
             continue;
         }
 
-        log!("end parse_expr", "{:?} stop_at={:?} stopped_at={:?}", buffer, stop_at, self.stopped_at);
+        log!(
+            "end parse_expr",
+            "{:?} stop_at={:?} stopped_at={:?}",
+            buffer,
+            stop_at,
+            self.stopped_at
+        );
         self.parse_expr_from_buffer(buffer)
     }
 
@@ -455,7 +468,12 @@ impl Parser {
     /// Used to "condence" expressions that are made up of multiple expressions.
     /// Ex. (1 + 2) * (2 / 2) -> BinOp(BinOp(1, '+', 2), '*', BinOp(2, '/', 2))
     fn parse_expr_from_buffer(&mut self, buffer: Vec<Expr>) -> Expr {
-        log!("parse_expr_from_buffer", "buffer={:?}, stop_token={:?}", buffer, self.stopped_at);
+        log!(
+            "parse_expr_from_buffer",
+            "buffer={:?}, stop_token={:?}",
+            buffer,
+            self.stopped_at
+        );
 
         if buffer.is_empty() {
             return Expr::Empty;
@@ -497,7 +515,6 @@ impl Parser {
         )
     }
 
-
     /// Parse a distrubution expression.
     /// Should be called when encountering a PIPE token.
     /// | {sequence} -> {sequence};
@@ -505,7 +522,7 @@ impl Parser {
     /// ---
     /// * Distribution - Distribute PI and Coords into the Direction and Distance functions.
     /// ```| PI, Coords -> Direction, Distance; ``````
-    /// * Iter distribution - Distribute a arguments as iterable 
+    /// * Iter distribution - Distribute a arguments as iterable
     /// ```|> inputs, outputs -> f1, f2;```  Iterate over inputs and outputs and distribute them into f1 and f2
     fn parse_distribution(&mut self, is_iter: bool) -> Expr {
         log!("parse_distribution");
@@ -531,7 +548,10 @@ impl Parser {
             error!(
                 &self.lexer,
                 "Expected a semicolon or new line after recipients in distribution operator.",
-                format!("| {:?} -> {:?} ... <- Can't end like this must be \";\" or new line.", args, rec_expr)
+                format!(
+                    "| {:?} -> {:?} ... <- Can't end like this must be \";\" or new line.",
+                    args, rec_expr
+                )
             );
         }
 
@@ -540,22 +560,18 @@ impl Parser {
             _ => vec![rec_expr],
         };
 
-
-        log!("end parse_distribution", "args={:?} recipients={:?}", args, recipients);
+        log!(
+            "end parse_distribution",
+            "args={:?} recipients={:?}",
+            args,
+            recipients
+        );
 
         if is_iter {
-            return Expr::IterDistribution {
-                args,
-                recipients
-            };
+            return Expr::IterDistribution { args, recipients };
         }
-        return Expr::Distribution {
-            args,
-            recipients,
-        };
-
+        return Expr::Distribution { args, recipients };
     }
-
 
     /// Parse a parenthesis expression, sequence or function call.
     /// Should be called when encountering a L_PAREN token.
@@ -583,7 +599,12 @@ impl Parser {
                 );
             }
 
-            log!("parse_paren]", "expr={:?} stop_token={:?}", expr, stop_token);
+            log!(
+                "parse_paren]",
+                "expr={:?} stop_token={:?}",
+                expr,
+                stop_token
+            );
             buffer.push(expr);
 
             match stop_token.unwrap() {
@@ -666,7 +687,7 @@ impl Parser {
                     "Unexpected end of file.",
                     "{{ ...",
                     "Expected a key or closing bracket, but got nothing instead."
-                )
+                ),
             };
 
             log!("parse_dict", "key={:?} stop_token={:?}", key, stop_token);
@@ -745,10 +766,9 @@ impl Parser {
         expr_type: &Expr,
         stop_at: Option<&[TokenKind]>,
     ) -> Option<Expr> {
-
         let expr = self.parse_expr(stop_at);
 
-        if expr == Expr::Empty || expr != *expr_type  {
+        if expr == Expr::Empty || expr != *expr_type {
             error!(
                 &self.lexer,
                 format!("Expected an expression of type {:?}.", expr_type),
@@ -806,23 +826,25 @@ impl Parser {
                 identifiers: vec![ident],
                 values: vec![value],
             };
-        } 
-        
+        }
         // Deconstruction
-        else if ident == (Expr::Dict { keys: Vec::new(), values: Vec::new() }) {
-
+        else if ident
+            == (Expr::Dict {
+                keys: Vec::new(),
+                values: Vec::new(),
+            })
+        {
             // Unpack keys from ident
             let keys = match ident {
                 Expr::Dict { keys, values: _ } => keys,
-                _ => unreachable!()
+                _ => unreachable!(),
             };
 
             return Stmt::Deconstruction {
                 identifiers: keys,
-                value
+                value,
             };
-        }
-        else {
+        } else {
             error!(
                 &self.lexer,
                 "Expected an identifier or keys before assingment operator.",

@@ -81,6 +81,8 @@ pub enum Expr {
         args: Vec<Expr>,
         recipients: Vec<Expr>,
     },
+
+    Comment(String),
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.
@@ -104,6 +106,11 @@ impl PartialEq for Expr {
             (Block(_), Block(_)) => true,
             (FunctionCall { .. }, FunctionCall { .. }) => true,
             (Dict { .. }, Dict { .. }) => true,
+            (Alias(_), Alias(_)) => true,
+            (Range { .. }, Range { .. }) => true,
+            (Distribution { .. }, Distribution { .. }) => true,
+            (IterDistribution { .. }, IterDistribution { .. }) => true,
+            (Comment(_), Comment(_)) => true,
             _ => false,
         }
     }
