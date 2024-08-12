@@ -2,3 +2,4 @@
 /lang-python
 /.vscode
 /.github
+**/__pycache__/
