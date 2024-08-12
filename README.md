@@ -2,20 +2,14 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO 
-- Signal  <-- 
-- [x] Desctructuring 
-- [x] Distribute & Iter Distribute 
+- [x] Custom Builtins
+- Imports 
+- Singals ( need to be re-thinked )
 
 # Syntax
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
 ```lang
-# This is a comment
-a = 1
-{
-    # Block
-    b = 2
-    c = a + b
-}
+// This is a comment
 
 1..10 # Range
 

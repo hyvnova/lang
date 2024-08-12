@@ -79,9 +79,13 @@ pub enum TokenKind {
 
     NEG, // !
     AND, // &
-        // | OR is PIPE 
+    PIPE,// | (bitwise or)
     XOR, // ^
     NOT, // ~
+
+    _bitwise_end, // index to end of bitwise operator tokens
+
+    AT,   // @
 
     _op_end, // index to end of operator tokens
 
@@ -96,11 +100,9 @@ pub enum TokenKind {
     
     DOT,       // .
     HASH,      // #
-    AT,        // @
     DOLLAR_SING, // $
 
     // pipes... 
-    PIPE,      // |
     PIPE_RIGHT, // |>
     PIPE_LEFT,  // <|
 
@@ -569,6 +571,6 @@ impl Lexer {
     }
 
     pub fn is_bitwise_operator(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_bitwise_start as i16;
+        return token.kind as i16 > TokenKind::_bitwise_start as i16 && (token.kind as i16) < TokenKind::_bitwise_end as i16;
     }
 }

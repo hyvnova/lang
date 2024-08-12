@@ -1,6 +1,7 @@
+#[python]
+@Derive(Iter, Get, property_name="items")
+class MyClass:
+    def __init__(self, items):
+        self.items = item
+#[endpython]
 
-/* This is a comment??? 
-    wait wait
-    do we have multiline commnet?
-*/
-$meta_var 

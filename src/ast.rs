@@ -83,6 +83,13 @@ pub enum Expr {
     },
 
     Comment(String),
+
+    /// Decorator
+    /// @{name}({args})
+    Decorator {
+        name: Box<Expr>,
+        args: Option<Box<Expr>>,
+    },
 }
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.

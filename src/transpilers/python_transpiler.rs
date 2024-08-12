@@ -2,9 +2,53 @@
 /// This mode implements the Transpile trait for the AST Node, Stmt and Expr
 /// It converts the AST to a string representation of the code in Python
 use crate::ast::{Expr, Node, Stmt, AST};
+use std::fs;
+use std::path::Path;
 
 trait Transpile {
     fn transpile(&self) -> String;
+}
+
+
+/// Folder containing custom builtins modules for Python
+const BUILTINS_PATH: &str = "./src/transpilers/python/custom_builtins/";
+
+pub fn transpile(ast: &AST) -> String {
+    let mut code = String::new();
+
+    // Include custom builtins
+    if ! Path::new(BUILTINS_PATH).exists() {
+        eprintln!("[Python Transpiler] Custom builtins not found at {}", BUILTINS_PATH);
+        eprintln!("[Python Transpiler] Skipping custom builtins");
+    } else {
+
+        code.push_str("# Custom builtins\n");
+        code.push_str("import sys\n");
+        code.push_str(format!("sys.path.append('{}')\n", BUILTINS_PATH).as_str());
+
+        // Iterate over the files in the directory
+        for entry in fs::read_dir(BUILTINS_PATH).expect("Failed to read  custom builtin directory") {
+            let entry = entry.expect("Failed to read entry");
+            let path = entry.path();
+
+            // Check if it's a  python file and doesn't start
+            if path.is_file() && path.extension().unwrap_or_default() == "py" && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+            {
+                // Include the file
+                code.push_str(&format!("from {} import *\n", path.file_stem().unwrap().to_str().unwrap()));
+            }
+        }
+
+        code.push_str("\n");
+        code.push_str("# End of custom builtins\n\n");
+    }
+
+            
+    for node in ast.children.borrow().iter() {
+        code.push_str(&node.transpile());
+    }
+
+    code
 }
 
 impl Transpile for Expr {
@@ -99,7 +143,7 @@ impl Transpile for Expr {
                 inclusive,
             } => {
                 format!(
-                    "range({}, {}{})",
+                    "Iterator(range({}, {}{}))",
                     start.transpile(),
                     end.transpile(),
                     if *inclusive { "+1" } else { "" }
@@ -154,6 +198,11 @@ impl Transpile for Expr {
                 }
 
                 code
+            }
+
+
+            Decorator { name, args } => {
+                format!("@{}{}", name.transpile(), if args.is_some() { args.clone().unwrap().transpile() } else { "".to_string() })
             }
         }
     }
@@ -236,14 +285,4 @@ impl Transpile for Node {
             Node::Expr(expr) => expr.transpile(),
         }
     }
-}
-
-pub fn transpile(ast: &AST) -> String {
-    let mut code = String::new();
-
-    for node in ast.children.borrow().iter() {
-        code.push_str(&node.transpile());
-    }
-
-    code
 }

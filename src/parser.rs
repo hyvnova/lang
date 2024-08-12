@@ -426,6 +426,20 @@ impl Parser {
                             };
                         }
 
+                        // If operapor is a "@" then it's a decorator
+                        if token.kind == TokenKind::AT {
+                            let name = self.get_expr(&Expr::Identifier(String::new()), tkarr!(L_PARENT));
+
+                            if let Some(TokenKind::L_PARENT) = self.stopped_at {
+                                let args = self.parse_paren();
+                                return Expr::Decorator { name: bit!(name), args: Some(bit!(args)) };
+
+                            } else {
+                                return Expr::Decorator { name: bit!(name), args: None };
+                            }
+                        }
+
+
                         error!(
                             &self.lexer,
                             "Expected an expression before operator.",
