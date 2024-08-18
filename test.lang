@@ -1,7 +1,14 @@
-#[python]
-@Derive(Iter, Get, property_name="items")
-class MyClass:
-    def __init__(self, items):
-        self.items = item
-#[endpython]
+$a  = 1
+$b = $a + 2
+$c = 3
+
+print(a, b, c)
+
+$a += $c
+
+print(a, b, c)
+
+$c *= 2
+
+print(a, b, c)
 

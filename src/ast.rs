@@ -1,5 +1,3 @@
-#[allow(dead_code, unused)]
-
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -40,6 +38,10 @@ pub enum Expr {
     ///  A sequence of expressions. Serves as a way to group expressions without parenthesis. Sort of like a tuple.
     /// {expr}, {expr}, ...
     Sequence(Vec<Expr>),
+
+    /// WrappedSequence
+    /// A sequence wrapped by parenthesis. Ex. `(1, 2, 3)`
+    WrappedSequence(Vec<Expr>),
 
     /// Block of code
     Block(Vec<Node>),
@@ -90,7 +92,20 @@ pub enum Expr {
         name: Box<Expr>,
         args: Option<Box<Expr>>,
     },
+
+    /// Anon function
+    AnonFunction {
+        args: Box<Expr>,
+        body: Box<Expr>,
+    },
+    
+    /// Signal
+    /// ${name}
+    Signal(String),
 }
+
+
+
 
 /// Implementing PartialEq for Expr to allow for comparison of expressions.
 /// It only checks for type, not the content of the expressions. 
@@ -110,6 +125,7 @@ impl PartialEq for Expr {
             (NamedArg(_, _), NamedArg(_, _)) => true,
             (Array(_), Array(_)) => true,
             (Sequence(_), Sequence(_)) => true,
+            (WrappedSequence(_), WrappedSequence(_)) => true,
             (Block(_), Block(_)) => true,
             (FunctionCall { .. }, FunctionCall { .. }) => true,
             (Dict { .. }, Dict { .. }) => true,
@@ -118,6 +134,9 @@ impl PartialEq for Expr {
             (Distribution { .. }, Distribution { .. }) => true,
             (IterDistribution { .. }, IterDistribution { .. }) => true,
             (Comment(_), Comment(_)) => true,
+            (Decorator { .. }, Decorator { .. }) => true,
+            (AnonFunction { .. }, AnonFunction { .. }) => true,
+            (Signal(_), Signal(_)) => true,
             _ => false,
         }
     }
@@ -135,6 +154,24 @@ pub enum Stmt {
     Assign {
         identifiers: Vec<Expr>,
         values: Vec<Expr>,
+        op: String, // =, +=, -=, *=, /=
+    },
+    
+    /// Signal definition
+    /// $ {name} = {value}
+    SignalDef {
+        name: String,
+        value: Expr,
+        dependencies: Vec<String>,
+    },
+
+    /// Signal update
+    /// ${name} = {value}
+    /// In different from SignalDef, this is used to update the value of a signal, maintaining it's listeners.
+    SignalUpdate {
+        name: String,
+        value: Expr,
+        dependencies: Vec<String>,
     },
 
     /// Deconstruction
@@ -163,6 +200,10 @@ impl PartialEq for Stmt {
             (Expr(_), Expr(_)) => true,
             (Assign { .. }, Assign { .. }) => true,
             (FunctionDef { .. }, FunctionDef { .. }) => true,
+            (Import(_, _), Import(_, _)) => true,
+            (From(_, _, _), From(_, _, _)) => true,
+            (Python(_), Python(_)) => true,
+            (SignalDef { .. }, SignalDef { .. }) => true,
             _ => false,
         }
     }

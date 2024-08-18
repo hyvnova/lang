@@ -35,11 +35,10 @@ pub fn transpile(ast: &AST) -> String {
             if path.is_file() && path.extension().unwrap_or_default() == "py" && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
             {
                 // Include the file
-                code.push_str(&format!("from {} import *\n", path.file_stem().unwrap().to_str().unwrap()));
+                code.push_str(&format!("from {} import * \n", path.file_stem().unwrap().to_str().unwrap()));
             }
         }
 
-        code.push_str("\n");
         code.push_str("# End of custom builtins\n\n");
     }
 
@@ -99,6 +98,17 @@ impl Transpile for Expr {
             }
 
             Sequence(values) => {
+                let mut code = String::new();
+                for (i, value) in values.iter().enumerate() {
+                    code.push_str(&value.transpile());
+                    if i < values.len() - 1 {
+                        code.push_str(", ");
+                    }
+                }
+                code
+            }
+
+            WrappedSequence(values) => {
                 let mut code = String::from("(");
                 for (i, value) in values.iter().enumerate() {
                     code.push_str(&value.transpile());
@@ -204,6 +214,12 @@ impl Transpile for Expr {
             Decorator { name, args } => {
                 format!("@{}{}", name.transpile(), if args.is_some() { args.clone().unwrap().transpile() } else { "".to_string() })
             }
+
+            AnonFunction { args, body } => {
+                format!("lambda {}: {}", args.transpile(), body.transpile())
+            }
+            
+            Signal(name) => format!("{}.value", name),
         }
     }
 }
@@ -219,12 +235,13 @@ impl Transpile for Stmt {
             Assign {
                 identifiers,
                 values,
+                op
             } => {
                 let mut code = String::new();
 
                 for (i, ident) in identifiers.iter().enumerate() {
                     code.push_str(&ident.transpile());
-                    code.push_str(" = ");
+                    code.push_str(&format!(" {op} ",));
                     code.push_str(&values[i].transpile());
                     code.push_str("\n");
                 }
@@ -274,6 +291,30 @@ impl Transpile for Stmt {
                     None => "".to_string(),
                 }
             ),
+            
+            SignalDef { name, value , dependencies} => {
+                format!("{0} = Signal(lambda {0}: {1}){2} \n", 
+                    name, 
+                    value.transpile(), 
+                    if dependencies.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(".listen_to({})", dependencies.join(", "))
+                    } 
+                )
+            }
+
+            SignalUpdate { name, value, dependencies } => {
+                format!("{0}.update(lambda {0}: {1}){2} \n", 
+                    name, 
+                    value.transpile(), 
+                    if dependencies.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(".listen_to({})", dependencies.join(", "))
+                    } 
+                )
+            }
         }
     }
 }

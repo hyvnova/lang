@@ -14,7 +14,7 @@ pub enum TokenKind {
     _stmt_start, // index to start of statement tokens
     //   Instructions
     DEF,
-    ASSIGN,   // =
+    ASSIGN,   // =, +=, -=, *=, /=, **=, %=
     IMPORT,   // import
     CONTINUE, // continue
     BREAK,    // break
@@ -23,6 +23,8 @@ pub enum TokenKind {
     AS,       // as  (for aliasing)
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
+
+
 
     _stmt_end, // index to end of statement tokens
 
@@ -242,6 +244,43 @@ impl Lexer {
         self.current_token_value = Some(ch.to_string());
 
         match ch {
+            // Arithmetic assignment
+            '+' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("+=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
+            '-' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("-=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
+            '*' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("*=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
+            '/' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("/=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
+            '*' if self.peek_next_char() == Some('*') && self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past *
+                self.current_token_value = Some("**=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
+            '%' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some("%=".to_string());
+                return TokenKind::ASSIGN;
+            }
+
             // Comments -- value of comment is the comment itself
             '/' if self.peek_next_char() == Some('/') => {
                 self.next_char(); // Move past /

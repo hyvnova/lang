@@ -7,6 +7,7 @@ edition = "2021"
 clap = { version = "4.5.13", features = ["derive"] }
 colored = "2.1.0"
 phf = { version = "0.11.2", features = ["macros"] }
+quote = "1.0.36"
 rand = "0.8.5"
 
 [build]

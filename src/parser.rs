@@ -38,6 +38,14 @@ pub struct Parser {
     // Travel variables -- used to keep track of control flow
     stopped_at: Option<TokenKind>, // token in which a parser stopped
     capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
+
+    // if the parser is capturing signals, this will be a list of signals.
+    // Used to keep track of "dependencies" of signals, so we can later on generate the correct code.
+    capturing_signals: Option<Vec<String>>, 
+
+    // Used to differentiate between signal definition and singal update
+    // If a signal is defined, any type of assignment will be considered as a signal update
+    defined_signals: Vec<String>,
 }
 
 impl Parser {
@@ -51,6 +59,8 @@ impl Parser {
 
             stopped_at: None,
             capturing_sequence: false,
+            capturing_signals: None,
+            defined_signals: Vec::new(),
         }
     }
 
@@ -138,10 +148,16 @@ impl Parser {
                     return Stmt::Python(token.value.clone());
                 }
 
-                TokenKind::ASSIGN => {
+                // * Assingment & Deconstruction & Arithmetic assingments
+                // {ident} = {expr};
+                // {ident} += {expr};
+                // { {ident}, {ident} } = {expr};
+                TokenKind::ASSIGN  => {
+                    self.put_back(token);
                     let stmt = self.parse_assingment();
                     return stmt;
                 }
+
 
                 // * Function definition
                 // `def {ident}({ident}, {ident}, ...) {block}`
@@ -275,6 +291,71 @@ impl Parser {
                     self.ast.add(Node::Expr(Expr::Comment(token.value.clone())));
                     continue;
                 }
+                
+                // * Signal 
+                // ${ident}
+                TokenKind::DOLLAR_SING => {
+                    let ident = self.next_token().unwrap_or_else(|| {
+                        error!(
+                            &self.lexer,
+                            "Expected an identifier after signal operator.",
+                            format!("${:?}", token),
+                            " ^^^ - This is not an identifier."
+                        )
+                    });
+
+                    if ident.kind != TokenKind::IDENTIFIER {
+                        error!(
+                            &self.lexer,
+                            "No name provided for signal.",
+                            format!("${:?}", ident),
+                            " ^^^ - This is not an identifier."
+                        );
+                    }
+
+                    if let Some(signals) = &mut self.capturing_signals {
+                        signals.push(ident.value.clone());
+                    }
+
+                    buffer.push(Expr::Signal(ident.value.clone()));
+                    continue;
+                }
+
+                // * Anonymous function
+                // {args} -> {expr};
+                // {args} -> {block}
+                TokenKind::R_ARROW => {
+                    if buffer.is_empty() {
+                        error!(
+                            &self.lexer,
+                            "Expected args definition for anonymous function.",
+                            format!("-> ..."),
+                            " ^^^ - Missing arguments here."
+                        );
+                    }
+
+                    let args = buffer.pop().unwrap();
+
+                    if args != Expr::WrappedSequence(Vec::new())  {
+                        error!(
+                            &self.lexer,
+                            "Expected args definition for anonymous function. This is not a valid argument definition."
+                        );
+                    }
+
+                    // Parse block or expr
+                    let body = self.parse_expr(tkarr![SEMICOLON, NEW_LINE]);
+
+                    if self.stopped_at.is_none() && body != Expr::Block(Vec::new()) {
+                        error!(
+                            &self.lexer,
+                            "Expected a block or expression after anonymous function arguments."
+                        );
+                    }
+
+                    return Expr::AnonFunction { args: bit!(args), body: bit!(body) };
+
+                }
 
                 // * Array
                 // [expr, expr, ...]
@@ -345,9 +426,21 @@ impl Parser {
                     continue;
                 }
 
+                // * Parentheses (group, sequence)
+                // (expr, expr, ...)
+                // (expr * expr)
                 TokenKind::L_PARENT => {
                     let expr = self.parse_paren();
-                    buffer.push(expr);
+                    
+                    // If there's an identifier before, then it's a function call
+                    if let Some(ident) = buffer.pop() {
+                        buffer.push(Expr::FunctionCall {
+                            name: bit!(ident),
+                            args: bit!(expr),
+                        });
+                    } else {
+                        buffer.push(expr);
+                    }
                     continue;
                 }
 
@@ -365,7 +458,8 @@ impl Parser {
                 }
 
                 // * Assingment
-                TokenKind::ASSIGN => {
+                TokenKind::ASSIGN
+                 => {
                     // Solve buffer, since it is LHS and
                     let lhs = self.parse_expr_from_buffer(buffer.clone());
                     buffer.clear(); // Buffer was consumed in lhs
@@ -497,25 +591,6 @@ impl Parser {
             return buffer[0].clone();
         }
 
-        let mut index = 0;
-        while index < buffer.len() - 1 {
-            let current_expr = &buffer[index];
-            let next_expr = &buffer[index + 1];
-
-            // * Function Call
-            // {ident}{sequence | Group}
-            if let Expr::Identifier(_) = current_expr {
-                if let Expr::Sequence(_) | Expr::Group(_) = next_expr {
-                    return Expr::FunctionCall {
-                        name: bit!(current_expr.clone()),
-                        args: bit!(next_expr.clone()),
-                    };
-                }
-            }
-
-            index += 1;
-        }
-
         if self.capturing_sequence {
             self.capturing_sequence = false;
             return Expr::Sequence(buffer);
@@ -631,11 +706,13 @@ impl Parser {
                 _ => unreachable!(),
             }
         }
-
-        if buffer.len() == 1 {
+        
+        if buffer.len() == 1 && buffer[0] != Expr::Empty {
+            // An expression surrounded by parenthesis. Ex. (1 + 2 * a)
             Expr::Group(Box::new(buffer.pop().unwrap()))
         } else {
-            Expr::Sequence(buffer)
+            // A sequence of expressions. Ex. (1, 2, 3)
+            Expr::WrappedSequence(buffer)
         }
     }
 
@@ -810,10 +887,12 @@ impl Parser {
         expr.unwrap()
     }
 
-    /// Called when encountering a ASSING (=) token.
+    /// Called when encountering a Assingment kind token. Needs the token.
     /// LHS (ident) should be in AST.current_scope.
     /// * Assingment statement.
     /// - `{ident} = {expr};`
+    /// * Arithmetic assingment statement.
+    /// - `{ident} += {expr};`
     /// * Multiple assingment statement.
     /// - `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
     /// * Deconstruction
@@ -828,7 +907,38 @@ impl Parser {
             );
         }
 
+        let op = self.next_token().unwrap().value.clone();
+
         let ident: Expr = self.ast.pop().unwrap().into();
+
+        // Signal definition
+        // {Signal} = {expr}
+        if let Expr::Signal(name) = ident {
+
+            self.capturing_signals = Some(vec![]);
+
+            let mut value = self.parse_expr(None);
+
+            let dependencies = self.capturing_signals.take().unwrap();
+
+            if self.defined_signals.contains(&name) {
+
+                if op != "=" {
+                    value = Expr::BinOp {
+                        left: Box::new(Expr::Signal(name.clone())),
+                        op: op.clone()[..op.len()-1].to_string(), // Remove "=" because now it's a binop
+                        right: Box::new(value.clone()),
+                    };
+                }
+
+                return Stmt::SignalUpdate { name, value, dependencies };
+            } else {
+                self.defined_signals.push(name.clone());
+                return Stmt::SignalDef { name, value, dependencies };
+            }
+            
+        }
+        
         let value = self.parse_expr(None);
 
         // Single assingment
@@ -839,6 +949,7 @@ impl Parser {
             return Stmt::Assign {
                 identifiers: vec![ident],
                 values: vec![value],
+                op, 
             };
         }
         // Deconstruction
