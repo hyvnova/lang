@@ -216,7 +216,9 @@ impl Transpile for Expr {
             }
 
             AnonFunction { args, body } => {
-                format!("lambda {}: {}", args.transpile(), body.transpile())
+                let args_str = args.transpile();
+
+                format!("lambda {}: {}", args_str[1..args_str.len()-1].to_string(), body.transpile())
             }
             
             Signal(name) => format!("{}.value", name),

@@ -10,14 +10,4 @@ from typecasting import *
 
 
 
-a = Signal(lambda a: 1) 
-
-b = Signal(lambda b: a.value, a) 
-
-
-print(a.value, b.value)
-
-a.update(lambda a: b.value, b) 
-
-
-print(a.value, b.value)
+print((lambda n: n + 2)(4))
