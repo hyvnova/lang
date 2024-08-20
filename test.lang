@@ -1,14 +1,9 @@
-$a  = 1
-$b = $a + 2
-$c = 3
 
-print(a, b, c)
+$a = 1
+$b = $a
 
-$a += $c
+print($a, $b)
 
-print(a, b, c)
+$a = $b
 
-$c *= 2
-
-print(a, b, c)
-
+print($a, $b)

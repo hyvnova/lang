@@ -293,25 +293,25 @@ impl Transpile for Stmt {
             ),
             
             SignalDef { name, value , dependencies} => {
-                format!("{0} = Signal(lambda {0}: {1}){2} \n", 
+                format!("{0} = Signal(lambda {0}: {1}{2}) \n", 
                     name, 
                     value.transpile(), 
                     if dependencies.is_empty() {
                         "".to_string()
                     } else {
-                        format!(".listen_to({})", dependencies.join(", "))
+                        format!(", {}", dependencies.join(", "))
                     } 
                 )
             }
 
             SignalUpdate { name, value, dependencies } => {
-                format!("{0}.update(lambda {0}: {1}){2} \n", 
+                format!("{0}.update(lambda {0}: {1}{2}) \n", 
                     name, 
                     value.transpile(), 
                     if dependencies.is_empty() {
                         "".to_string()
                     } else {
-                        format!(".listen_to({})", dependencies.join(", "))
+                        format!(", {}", dependencies.join(", "))
                     } 
                 )
             }

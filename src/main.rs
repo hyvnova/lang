@@ -4,6 +4,12 @@ use lang::transpilers::python_transpiler::transpile;
 use std::path::PathBuf;
 use std::process::Command;
 
+use std::fs::File;
+use std::io::prelude::*;
+
+
+const OUTPUT_MODE: i8 = 2; // 1. console, 2. file, 0. both
+
 fn main() {
     // If arguments are passed, run cli
     if std::env::args().len() > 1 {
@@ -23,17 +29,27 @@ fn main() {
         println!("{:?}", node);
     }
 
-    println!("\n----------------------------- [transpile to python] ------------------------");
     let code = transpile(&ast);
 
-    // First 10 lines are imports so we skip them
-    println!(
-        "{}",
-        add_line_numbers(
-            &code.lines().skip(10).collect::<Vec<&str>>().join("\n")
-            // &code
-        )
-    );
+    if OUTPUT_MODE == 0 || OUTPUT_MODE == 1 {
+        println!("\n----------------------------- [transpile to python] ------------------------");
+        // *1. Write code to console
+
+        // First 10 lines are imports so we skip them
+        println!(
+            "{}",
+            add_line_numbers(
+                &code.lines().skip(10).collect::<Vec<&str>>().join("\n")
+            )
+        );
+    }
+
+    if OUTPUT_MODE == 0 || OUTPUT_MODE == 2 {
+        // * 2.  Wrtie code to file
+        let mut file = File::create("out.py").expect("Unable to create file");
+        file.write_all(&code.as_bytes()).expect("Unable to write data");
+    }
+
     println!("-------------------------------[py output ]----------------------");
 
     // run the python code

@@ -7,6 +7,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
 - Signals <-- here
 - Arrow Functions
 - Lexer scaping special characters in strings
+- Meta-reactivity
 
 # Syntax
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
@@ -16,8 +17,8 @@ Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
 1..10 // Range
 
 $a = 1 // Signal
-$b = a + 1 // when a changes, b changes
-$a = b + 1 // Silly infinite loop
+$b = $a // when a changes, b changes
+$a = $b // Silly infinite loop (not really)
 
 // Distribute
 res = | PI, Coords -> Direction, Distance; # Distribute PI and Coords into the Direction and Distance functions.
