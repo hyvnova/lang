@@ -2,14 +2,11 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO 
-- [x] Custom Builtins
 - Imports 
-- Signals <-- here
-- Arrow Functions
 - Lexer scaping special characters in strings
 - Meta-reactivity
 
-# Syntax
+# Syntax    
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
 ```lang
 // This is a comment

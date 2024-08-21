@@ -165,6 +165,9 @@ pub struct Lexer {
 
     // Token value (if needed)
     current_token_value: Option<String>,
+
+    // If lexer is currently capturing a string
+    capturing_string: bool,
 }
 
 impl Lexer {
@@ -177,6 +180,8 @@ impl Lexer {
             column: 0,
 
             current_token_value: None,
+
+            capturing_string: false,
         }
     }
 
@@ -492,6 +497,7 @@ impl Lexer {
 
             // Quotes -- Strings
             _ if ch == '"' || ch == '\'' => {
+                self.capturing_string = true;
 
                 // This sucks...  but I don't want to modify capture to take a closure that returns a bool
                 if  ch == '\'' {
@@ -501,6 +507,8 @@ impl Lexer {
                 }
                 self.current_char_index += 1; // Move past quote
                 self.column += 1;
+                self.capturing_string = false;
+
                 return TokenKind::STRING;
             }
 
@@ -544,6 +552,7 @@ impl Lexer {
     /// This to prevent the range operator from being captured as a number
     fn capture(&mut self, ch: char, condition: fn(char) -> bool) {
         let mut value = String::new();
+
         if ch != ' ' {
             value.push(ch);
         }
@@ -551,7 +560,7 @@ impl Lexer {
         loop {
             let ch = self.next_char();
 
-            if ch.is_none() || !condition(ch.unwrap()) {
+            if ch.is_none() || (!condition(ch.unwrap()) && value.chars().last().unwrap_or(' ') != '\\') {
                 self.current_char_index -= 1; // Move back, since char is not part of value
                 self.column -= 1;
                 break;

@@ -8,6 +8,4 @@ from signals import *
 from typecasting import * 
 # End of custom builtins
 
-
-
-print((lambda n: n + 2)(4))
+print("\n hola \" hola \"")
