@@ -24,7 +24,6 @@ from typing import Iterable, List, Self, Set
 class Signal:
     def __init__(self, callback, *deps):
         self.listeners: Set[Signal] = set()
-        print(f"{deps=}")
         self.update(callback, *deps)
 
     def listen_to(self, deps: Iterable[Self]):
@@ -38,7 +37,6 @@ class Signal:
         """
         Updates the callback of the signal
         """
-        print(f"update {deps=}")
         self.callback = callback
         self.listen_to(deps)
         self()
@@ -49,9 +47,24 @@ class Signal:
         Call when a signal being listened to changes
         """
         self.value = self.callback(self)
-        print(f"{self.listeners=}")
         for listener in self.listeners:
             listener()
 
     def __str__(self):
         return str(self.value)
+    
+
+
+
+"""
+Function Signals
+- Relation between functions that depend on signals
+- Relation between signals that depend on functions
+
+Example
+```
+Lang            | Python
+----------------|------------------
+$a = 1          | a = Signal(lambda a: 1)
+(n) -> $a + n   | f = lambda n: a.value + n
+"""

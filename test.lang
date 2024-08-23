@@ -1,1 +1,4 @@
-print("\n hola \" hola \"")
+$x = 0..10
+$y = $x.map((n) -> n * 2)
+
+print(x, y, sep="\n")

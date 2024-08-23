@@ -93,7 +93,7 @@ class Iterator:
 
     def __getitem__(self, key: Union[int, slice]) -> object:
         return self._iterable[key]
-
+    
     def __setitem__(self, key: Union[int, slice], value: object) -> None:
         self._iterable[key] = value
 
@@ -134,19 +134,37 @@ class Iterator:
         return self._iterable >= other
 
     def __add__(self, other: Iterable) -> Iterable:
-        return self._iterable + other
+        return tuple(map(lambda x: x + other, self._iterable))
+
+    def __sub__(self, other: Iterable) -> Iterable:
+        return tuple(map(lambda x: x - other, self._iterable))
+    
+    def __isub__(self, other: Iterable) -> Iterable:
+        self._iterable -= other
 
     def __iadd__(self, other: Iterable) -> Iterable:
-        return self._iterable + other
+        self._iterable += other
 
     def __mul__(self, other: int) -> Iterable:
-        return self._iterable * other
+        return tuple(map(lambda x: x * other, self._iterable))
 
     def __imul__(self, other: int) -> Iterable:
-        return self._iterable * other
+        self._iterable *= other
 
     def __rmul__(self, other: int) -> Iterable:
-        return self._iterable * other
+        return tuple(map(lambda x: other * x, self._iterable))
+    
+    def __floordiv__(self, other: int) -> Iterable:
+        return tuple(map(lambda x: x // other, self._iterable))
+
+    def __ifloordiv__(self, other: int) -> Iterable:
+        self._iterable //= other
+    
+    def __truediv__(self, other: int) -> Iterable:
+        return tuple(map(lambda x: x / other, self._iterable))
+    
+    def __itruediv__(self, other: int) -> Iterable:
+        self._iterable /= other
 
     def filter(self, func: Callable[[object], bool]) -> Type[Self]:
         """

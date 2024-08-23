@@ -44,7 +44,7 @@ pub fn transpile(ast: &AST) -> String {
 
             
     for node in ast.children.borrow().iter() {
-        code.push_str(&node.transpile());
+        code.push_str(&format!("{}\n", node.transpile()));
     }
 
     code
@@ -83,18 +83,15 @@ impl Transpile for Expr {
 
             UnaryOp { op, expr } => format!("{}{}", op, expr.transpile()),
 
-            NamedArg(name, value) => format!("{} = {}", name.transpile(), value.transpile()),
+            NamedArg(name, value) => format!("{} = {}", name, value.transpile()),
 
             Array(values) => {
-                let mut code = String::from("[");
-                for (i, value) in values.iter().enumerate() {
-                    code.push_str(&value.transpile());
-                    if i < values.len() - 1 {
-                        code.push_str(", ");
-                    }
-                }
-                code.push_str("]");
-                code
+                format!("[{}]", values.transpile())
+            }
+
+            Index { object, index } => {
+                format!("{}[{}]", object
+                    .transpile(), index.transpile())
             }
 
             Sequence(values) => {
@@ -129,7 +126,7 @@ impl Transpile for Expr {
                 code
             }
 
-            FunctionCall { name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+            FunctionCall { name, args } => format!("{}{}\n", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");
@@ -153,7 +150,7 @@ impl Transpile for Expr {
                 inclusive,
             } => {
                 format!(
-                    "Iterator(range({}, {}{}))",
+                    "Iterator(tuple(range({}, {}{})))",
                     start.transpile(),
                     end.transpile(),
                     if *inclusive { "+1" } else { "" }

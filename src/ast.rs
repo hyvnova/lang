@@ -30,10 +30,17 @@ pub enum Expr {
     },
 
     /// Represents a function call. Ex. `function(name = value)``
-    NamedArg(Box<Expr>, Box<Expr>),
+    NamedArg(String, Box<Expr>),
 
-    /// An array of expressions. Ex. `[1, 2, 3]`
-    Array(Vec<Expr>),
+    /// An array . Ex. `[1, 2, 3]` 
+    Array(Box<Expr>),
+
+
+    /// Indexing. Ex. `array[0]` or `object[key]` or `object[1..3]`
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+    },
 
     ///  A sequence of expressions. Serves as a way to group expressions without parenthesis. Sort of like a tuple.
     /// {expr}, {expr}, ...

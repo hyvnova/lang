@@ -8,4 +8,8 @@ from signals import *
 from typecasting import * 
 # End of custom builtins
 
-print("\n hola \" hola \"")
+x = Signal(lambda x: Iterator(tuple(range(0, 10)))) 
+
+y = Signal(lambda y: x.value.map(lambda n: n * 2)
+, x) 
+
