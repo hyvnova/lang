@@ -314,6 +314,16 @@ impl Transpile for Stmt {
                     } 
                 )
             }
+
+            ReactiveStmt { block, dependencies } => {
+                let mut code = String::from("def _lang_reactive_stmt():\n");
+                for node in block.iter() {
+                    code.push_str(format!("\t{0}", node.transpile()).as_str());
+                }
+
+                code.push_str(format!("\nReactiveStmt(_lang_reactive_stmt, {})", dependencies.join(", ")).as_str());
+                code
+            }
         }
     }
 }

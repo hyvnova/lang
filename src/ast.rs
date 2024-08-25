@@ -198,6 +198,10 @@ pub enum Stmt {
 
     Import(Expr, Option<Expr>), // import <thing> [as <alias>]          last arguments the optional alias
     From(Expr, Expr, Option<Expr>), // from <a> import <b> [as <alias>]
+    ReactiveStmt{
+        block: Vec<Node>,
+        dependencies: Vec<String>,
+    }
 }
 
 impl PartialEq for Stmt {
@@ -211,6 +215,9 @@ impl PartialEq for Stmt {
             (From(_, _, _), From(_, _, _)) => true,
             (Python(_), Python(_)) => true,
             (SignalDef { .. }, SignalDef { .. }) => true,
+            (SignalUpdate { .. }, SignalUpdate { .. }) => true,
+            (Deconstruction { .. }, Deconstruction { .. }) => true,
+            (ReactiveStmt { .. }, ReactiveStmt { .. }) => true,
             _ => false,
         }
     }

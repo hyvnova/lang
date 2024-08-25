@@ -55,6 +55,21 @@ class Signal:
     
 
 
+"""
+Reactive Statement
+When a dependency changes, the code is re-executed
+"""
+class ReactiveStmt:
+    def __init__(self, callback, *deps):
+        for signal in deps:
+            signal.listeners.add(self) 
+
+        self.callback = callback
+        self()
+
+    def __call__(self):
+        self.value = self.callback()
+        return self.value
 
 """
 Function Signals

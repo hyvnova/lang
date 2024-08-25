@@ -282,8 +282,27 @@ impl Parser {
                 }
 
                 // * Signal
+                // * Reactive statement
                 // ${ident}
                 TokenKind::DOLLAR_SING => {
+
+                    // if next token is a "{" thne it;s a reactive statement
+                    if let Some(TokenKind::L_BRACKET) = self.peek_token().map(|t| t.kind) {
+
+                        log!("reactive statement");
+
+                        self.next_token(); // Consume the L_BRACKET
+                        self.capturing_signals = Some(vec![]);
+                        let block = match self.parse_block() {
+                            Expr::Block(block) => block,
+                            _ => error!(&self.lexer, "Expected a block when declaring a reactive statement"),
+                        };
+                        let dependencies = self.capturing_signals.take().unwrap();
+
+                        self.ast.add(Node::Stmt(Stmt::ReactiveStmt { block, dependencies }));
+                        return Expr::Empty;   
+                    }
+
                     let ident = self.next_token().unwrap_or_else(|| {
                         error!(
                             &self.lexer,
@@ -791,6 +810,14 @@ impl Parser {
                     }
                 }
             }
+
+            if token.kind == TokenKind::NEW_LINE {
+                self.ast.add(Node::Expr(Expr::Newline));
+                self.next_token();
+                continue;
+            }
+
+            panic!("Unexpected token in block: {:?}", token);
         }
         let block = Expr::Block(self.ast.current_scope.borrow().clone());
         log!("end parse_block", "{:?}", block);
