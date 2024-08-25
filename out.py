@@ -10,6 +10,10 @@ from typecasting import *
 
 x = Signal(lambda x: Iterator(tuple(range(0, 10)))) 
 
+
 y = Signal(lambda y: x.value.map(lambda n: n * 2)
 , x) 
+
+
+print(x, y, sep = "\n")
 

@@ -14,7 +14,6 @@ pub enum TokenKind {
     _stmt_start, // index to start of statement tokens
     //   Instructions
     DEF,
-    ASSIGN,   // =, +=, -=, *=, /=, **=, %=
     IMPORT,   // import
     CONTINUE, // continue
     BREAK,    // break
@@ -24,12 +23,11 @@ pub enum TokenKind {
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
-
-
+    _expr_start, // index to start of expression tokens
+    ASSIGN,   // =, +=, -=, *=, /=, **=, %=
     _stmt_end, // index to end of statement tokens
 
     // Expressions
-    _expr_start, // index to start of expression tokens
     //   Parenthesis
     L_PARENT,
     R_PARENT,

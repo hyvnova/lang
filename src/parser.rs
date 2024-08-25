@@ -519,6 +519,7 @@ impl Parser {
 
                         self.ast.add(Node::Expr(lhs));
 
+                        self.put_back(token); // put back assingment token since parse_assingment needs to know which type of assingment.
                         let stmt = self.parse_assingment();
                         self.ast.add(Node::Stmt(stmt));
 
