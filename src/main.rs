@@ -20,12 +20,13 @@ fn main() {
     let path = PathBuf::from("test.lang");
     let mut parser = Parser::from_path(path);
 
-    let ast = parser.parse();
+    parser.parse();
+    let ast =  &parser.ast;
 
     println!("\n\n");
     println!("-----------------------------------------------------");
 
-    for node in ast.children.borrow().iter() {
+    for node in ast.get_scope() {
         println!("{:?}", node);
     }
 

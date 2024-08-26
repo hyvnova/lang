@@ -60,7 +60,8 @@ pub fn main() {
 
 fn run_lang(mut parser: LangParser, transpiler: String) {
     // * Parse file
-    let ast = parser.parse();
+    parser.parse();
+    let ast = &parser.ast;
 
     // * Transpile
     let code = use_transpiler!(transpiler, ast);

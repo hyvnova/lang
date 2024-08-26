@@ -110,6 +110,8 @@ pub enum TokenKind {
     L_ARROW, // <-
     R_ARROW, // ->
 
+    BIG_R_ARROW, // => (used in lambda functions)
+
     _expr_end, // index to end of expression tokens
 }
 
@@ -322,6 +324,13 @@ impl Lexer {
                     }
                 }
                 return TokenKind::ML_COMMENT;
+            }
+
+            // Big arrow
+            '=' if self.peek_next_char() == Some('>') => {
+                self.current_char_index += 1; // Move past >
+                self.current_token_value = Some("=>".to_string());
+                return TokenKind::BIG_R_ARROW;
             }
 
             // Arrows
@@ -594,8 +603,7 @@ impl Lexer {
 
     ///  Expression tokens are anything that can be part of an expression -- almost everything
     pub fn is_expression_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_expr_start as i16
-            && (token.kind as i16) < TokenKind::_expr_end as i16;
+        return token.kind as i16 > TokenKind::_expr_start as i16; // End is not considered because it's causing trrouble
     }
 
     /// Value tokens are tokens that represent a value, such as a number or a string

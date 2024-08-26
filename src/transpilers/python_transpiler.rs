@@ -43,7 +43,7 @@ pub fn transpile(ast: &AST) -> String {
     }
 
             
-    for node in ast.children.borrow().iter() {
+    for node in ast.get_scope() {
         code.push_str(&format!("{}\n", node.transpile()));
     }
 
@@ -212,7 +212,7 @@ impl Transpile for Expr {
                 format!("@{}{}", name.transpile(), if args.is_some() { args.clone().unwrap().transpile() } else { "".to_string() })
             }
 
-            AnonFunction { args, body } => {
+            Lambda { args, body } => {
                 let args_str = args.transpile();
 
                 format!("lambda {}: {}", args_str[1..args_str.len()-1].to_string(), body.transpile())
@@ -227,6 +227,8 @@ impl Transpile for Stmt {
     fn transpile(&self) -> String {
         use Stmt::*;
         match self {
+            Empty => "".to_string(),
+
             Expr(expr) => expr.transpile(),
 
             Python(code) => code.to_string(),

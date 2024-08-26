@@ -101,7 +101,7 @@ pub enum Expr {
     },
 
     /// Anon function
-    AnonFunction {
+    Lambda {
         args: Box<Expr>,
         body: Box<Expr>,
     },
@@ -142,7 +142,7 @@ impl PartialEq for Expr {
             (IterDistribution { .. }, IterDistribution { .. }) => true,
             (Comment(_), Comment(_)) => true,
             (Decorator { .. }, Decorator { .. }) => true,
-            (AnonFunction { .. }, AnonFunction { .. }) => true,
+            (Lambda { .. }, Lambda { .. }) => true,
             (Signal(_), Signal(_)) => true,
             _ => false,
         }
@@ -151,6 +151,8 @@ impl PartialEq for Expr {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
+    Empty, // Used to end parse_stmt
+
     Expr(Expr),
 
     Python(String), // Python code
@@ -258,31 +260,70 @@ impl Into<Stmt> for Node {
     }
 }
 
-use std::rc::Rc;
-use std::cell::RefCell;
-
 pub struct AST {
-    pub children: Rc<RefCell<Vec<Node>>>,
-    pub current_scope: Rc<RefCell<Vec<Node>>>, // scope where we add new nodes
+    // Vector of Scopes
+    // A scope is a vector of nodes
+    pub scope: Vec<Vec<Node>>
 }
 
 impl AST {
     pub fn new() -> Self {
-        let childrem: Rc<RefCell<Vec<Node>>> = Rc::new(RefCell::new(Vec::new()));
-
+        let childrem = Vec::new();
+        
         AST {
-            children: Rc::clone(&childrem),
-            current_scope: Rc::clone(&childrem),
+            scope: vec![childrem],
         }
     }
 
+    /// Create a new scope, which will be the current scope.
+    pub fn new_scope(&mut self) {
+        self.scope.push(Vec::new());
+    }
+
+    /// Pop the current scope.
+    pub fn pop_scope(&mut self) {
+        self.scope.pop();
+    }
+
+    /// Returns a reference to the current scope.
+    pub fn current_scope(&self) -> &Vec<Node> {
+        self.scope.last().unwrap()
+    }
+    
+    /// Return a copy of the current scope.
+    pub fn get_scope(&self) -> Vec<Node> {
+        self.scope.last().unwrap_or_else(|| panic!("No scope found")).clone()
+    }
+
     /// Add a new node to the current scope.
-    pub fn add(&mut self, node: Node) {
-        self.current_scope.borrow_mut().push(node);
+    pub fn add_node(&mut self, node: Node) {
+        self.scope.last_mut().unwrap_or_else(|| panic!("Can't add node -No scope found")).push(node);
     }
 
     /// Perform a pop operation on the current scope. 
-    pub fn pop(&mut self) -> Option<Node> {
-        self.current_scope.borrow_mut().pop()
+    pub fn pop_node(&mut self) -> Option<Node> {
+        self.scope.last_mut()?.pop()
+    }
+
+
+    /// Finds a Signal's dependencies given it's name
+    /// This asumes that the signal exists..
+    pub fn find_signal_deps(&self, name: &str) -> Vec<String> {
+        let mut deps = Vec::new();
+        for scope in &self.scope {
+            for node in scope {
+                match node {
+                    Node::Stmt(Stmt::SignalDef { name: n, dependencies, .. }) => {
+                        if n == name {
+                            deps = dependencies.clone();
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        deps
     }
 }
+

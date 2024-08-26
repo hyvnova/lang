@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
+use std::{fs, path::PathBuf};
 
 use crate::{
     ast::{Expr, Node, Stmt, AST},
@@ -37,6 +37,11 @@ pub struct Parser {
 
     // Travel variables -- used to keep track of control flow
     stopped_at: Vec<TokenKind>, // if the parser stopped at a token, this will be the token. Works as a Stack.
+
+    // Makes parse, parse_expr, parse_statement, etc. stop at a token.
+    // used to generally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
+    general_stop_at : Option<Vec<TokenKind>>, 
+
     capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
 
     // if the parser is capturing signals, this will be a list of signals.
@@ -58,8 +63,11 @@ impl Parser {
             ast: AST::new(),
 
             stopped_at: Vec::new(),
+            general_stop_at: None,
+            
             capturing_sequence: false,
             capturing_signals: None,
+
             defined_signals: Vec::new(),
         }
     }
@@ -100,10 +108,20 @@ impl Parser {
         copy
     }
 
-    pub fn parse(&mut self) -> &AST {
+    pub fn parse(&mut self) {
         // * Parse start
         while let Some(token) = self.peek_token() {
             log!("parse", "{:?}", token);
+
+
+            // General stop at
+            if let Some(stop_at) = &self.general_stop_at {
+                if stop_at.contains(&token.kind) {
+                    self.next_token(); // Consume the token
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    break;
+                } 
+            }
 
             // New lines
             if token.kind == TokenKind::NEW_LINE {
@@ -113,20 +131,19 @@ impl Parser {
 
             if Lexer::is_statement_token(&token) {
                 let statement: Stmt = self.parse_statement();
-                self.ast.add(Node::Stmt(statement));
+                self.ast.add_node(Node::Stmt(statement));
             } else if Lexer::is_expression_token(&token) {
                 let expr: Expr = self.parse_expr(None);
 
                 log!("+ parse", "Adding expression to AST: {:?}", expr);
 
-                self.ast.add(Node::Expr(expr));
+                self.ast.add_node(Node::Expr(expr));
             } else {
                 log!("! parse", "Unknown token: {:?}", token);
             }
 
         }
 
-        &self.ast
     }
 
     /// Called when encountering a statement token.
@@ -136,6 +153,14 @@ impl Parser {
         log!("parse_statement", "");
 
         while let Some(token) = self.next_token() {
+            // General stop at
+            if let Some(stop_at) = &self.general_stop_at {
+                if stop_at.contains(&token.kind) {
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    return Stmt::Empty; // Return empty statement
+                } 
+            }
+
             if token.kind == TokenKind::SEMICOLON {
                 break;
             }
@@ -227,7 +252,7 @@ impl Parser {
                 _ if Lexer::is_expression_token(&token) => {
                     self.put_back(token);
                     let expr = self.parse_expr(None);
-                    self.ast.add(Node::Expr(expr));
+                    self.ast.add_node(Node::Expr(expr));
 
                     continue;
                 }
@@ -262,6 +287,14 @@ impl Parser {
                 self.stopped_at
             );
 
+            // General stop at
+            if let Some(stop_at) = &self.general_stop_at {
+                if stop_at.contains(&token.kind) {
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    return self.parse_expr_from_buffer(buffer);
+                } 
+            }
+
             // If should stop
             if stop_at.contains(&token.kind) && !default_stop.contains(&token.kind) {
                 self.stopped_at.push(token.kind);
@@ -277,7 +310,7 @@ impl Parser {
             match token.kind {
                 // * Comments
                 TokenKind::COMMENT | TokenKind::ML_COMMENT => {
-                    self.ast.add(Node::Expr(Expr::Comment(token.value.clone())));
+                    self.ast.add_node(Node::Expr(Expr::Comment(token.value.clone())));
                     continue;
                 }
 
@@ -286,23 +319,48 @@ impl Parser {
                 // ${ident}
                 TokenKind::DOLLAR_SING => {
 
-                    // if next token is a "{" thne it;s a reactive statement
+                    // * if next token is a "{" tne it's a reactive statement
                     if let Some(TokenKind::L_BRACKET) = self.peek_token().map(|t| t.kind) {
 
                         log!("reactive statement");
 
                         self.next_token(); // Consume the L_BRACKET
                         self.capturing_signals = Some(vec![]);
+
                         let block = match self.parse_block() {
                             Expr::Block(block) => block,
                             _ => error!(&self.lexer, "Expected a block when declaring a reactive statement"),
                         };
-                        let dependencies = self.capturing_signals.take().unwrap();
 
-                        self.ast.add(Node::Stmt(Stmt::ReactiveStmt { block, dependencies }));
+                        let dependencies: Vec<String> = self.capturing_signals.take().unwrap();
+
+                        // Filter "dirty" signals
+                        // dirty sginals are signals that depend on another signal which is already part of the dependencies
+                        let dependencies: Vec<String> = dependencies
+                            .iter()
+                            .filter(|dep| {
+                                let dep = dep.clone(); // Current dependency being checked
+
+                                // Check if the current dependency is already covered by any other dependency
+                                !dependencies.iter().any(|signal| {
+                                    // Skip if it's the same signal to avoid self-comparison
+                                    if signal == dep {
+                                        return false;
+                                    }
+
+                                    // Check if the current signal indirectly covers the dependency
+                                    let signal_deps = self.ast.find_signal_deps(signal);
+                                    signal_deps.contains(&dep)
+                                })
+                            })
+                            .cloned() // Clone the remaining dependencies to collect
+                            .collect();
+
+                        self.ast.add_node(Node::Stmt(Stmt::ReactiveStmt { block, dependencies }));
                         return Expr::Empty;   
                     }
 
+                    // * Otherwise, it's a signal
                     let ident = self.next_token().unwrap_or_else(|| {
                         error!(
                             &self.lexer,
@@ -321,6 +379,8 @@ impl Parser {
                         );
                     }
 
+                    log!("signal", "{:?}", ident);
+
                     if let Some(signals) = &mut self.capturing_signals {
                         signals.push(ident.value.clone());
                     }
@@ -329,17 +389,17 @@ impl Parser {
                     continue;
                 }
 
-                // * Anonymous function
-                // {args} -> {expr};
-                // {args} -> {block}
-                TokenKind::R_ARROW => {
+                // * Lambda function
+                // {args} => {expr};
+                // {args} => {block}
+                TokenKind::BIG_R_ARROW => {
 
-                    log!("Anonymous function");
+                    log!("Lambda function");
 
                     if buffer.is_empty() {
                         error!(
                             &self.lexer,
-                            "Expected args definition for anonymous function.",
+                            "Expected args definition for Lambda function.",
                             format!("-> ..."),
                             " ^^^ - Missing arguments here."
                         );
@@ -352,7 +412,7 @@ impl Parser {
                     {
                         error!(
                             &self.lexer,
-                            "Expected args definition for anonymous function. This is not a valid argument definition.",
+                            "Expected args definition for Lambda function. This is not a valid argument definition.",
                             format!("-> {:?}", args)
                         );
                     }
@@ -363,11 +423,11 @@ impl Parser {
                     if self.stopped_at.is_empty() && body != Expr::Block(Vec::new()) {
                         error!(
                             &self.lexer,
-                            "Expected a block or expression after anonymous function arguments."
+                            "Expected a block or expression after Lambda function arguments."
                         );
                     }
 
-                    return Expr::AnonFunction {
+                    return Expr::Lambda {
                         args: bit!(args),
                         body: bit!(body),
                     };
@@ -515,32 +575,36 @@ impl Parser {
                         );
                     }
 
-                    // parsing named arg
+                    // * parsing named arg
                     if self.capturing_sequence {
 
                         let ident = buffer.pop().unwrap();
 
                         // There must be an identifier before =
-                        if let Expr::Identifier(name) = ident {
-                            let value = self.parse_expr(Some(stop_at));
-                            buffer.push(Expr::NamedArg(name, bit!(value)));
 
-                        } else {
-                            error!(&self.lexer, "Expected an Identifer before \"=\".");
+                        match ident {
+                            Expr::Identifier(name) 
+                            | Expr::Signal(name) => {
+                                let value = self.parse_expr(Some(stop_at));
+                                buffer.push(Expr::NamedArg(name, bit!(value)));
+                            }
+
+                            _ => error!(&self.lexer, "Expected an Identifer before \"=\", when parsing named argument.")
                         }
 
                         continue;
+
                     } else {
-                        // parsing assingment
+                        // * parsing assingment
                         // Solve buffer, since it is LHS and
                         let lhs = self.parse_expr_from_buffer(buffer.clone());
                         buffer.clear(); // Buffer was consumed in lhs
 
-                        self.ast.add(Node::Expr(lhs));
+                        self.ast.add_node(Node::Expr(lhs));
 
                         self.put_back(token); // put back assingment token since parse_assingment needs to know which type of assingment.
                         let stmt = self.parse_assingment();
-                        self.ast.add(Node::Stmt(stmt));
+                        self.ast.add_node(Node::Stmt(stmt));
 
                         break; // Finish parse_expr, since we parsed a stmt 
                     }
@@ -762,6 +826,8 @@ impl Parser {
         self.capturing_sequence = true;
 
         if let Some(TokenKind::R_PARENT) = self.stopped_at.pop() {
+            self.capturing_sequence = false;
+
             if let Expr::Sequence(values) = expr {
                 return Expr::WrappedSequence(values);
             } else {
@@ -787,42 +853,37 @@ impl Parser {
     fn parse_block(&mut self) -> Expr {
         log!("parse_block");
 
-        self.ast.current_scope = Rc::new(RefCell::new(Vec::new()));
+        self.ast.new_scope();
+        self.general_stop_at = Some(vec![TokenKind::R_BRACKET]);
+        self.parse();
 
-        while let Some(token) = self.peek_token() {
-            if token.kind == TokenKind::R_BRACKET {
-                self.next_token(); // Consume the R_BRACKET
-                break; // End of block
-            }
-
-            if Lexer::is_statement_token(&token) {
-                let stmt = self.parse_statement();
-                self.ast.add(Node::Stmt(stmt));
-            } else if Lexer::is_expression_token(&token) {
-                let expr = self.parse_expr(tkarr![R_BRACKET]);
-                log!("+ parse_block", "expr={:?}", expr);
-
-                self.ast.add(Node::Expr(expr));
-
-                if let Some(t) = self.stopped_at.pop() {
-                    if t == TokenKind::R_BRACKET {
-                        break;
-                    }
-                }
-            }
-
-            if token.kind == TokenKind::NEW_LINE {
-                self.ast.add(Node::Expr(Expr::Newline));
-                self.next_token();
-                continue;
-            }
-
-            panic!("Unexpected token in block: {:?}", token);
+        // No stop token
+        if self.stopped_at.is_empty() {
+            error!(
+                &self.lexer,
+                "Expected a closing bracket.",
+                "{ ...",
+                "Expected a closing bracket here."
+            );
         }
-        let block = Expr::Block(self.ast.current_scope.borrow().clone());
-        log!("end parse_block", "{:?}", block);
+        // If correct stop token -> pop it
+        // Otherwise, raise an error
+        if let Some(TokenKind::R_BRACKET) = self.stopped_at.pop() {
+            self.general_stop_at = None;
+        } else {
+            error!(
+                &self.lexer,
+                "Expected a closing bracket.",
+                "{ ...",
+                "Expected a closing bracket here."
+            );
+        }
 
-        self.ast.current_scope = self.ast.children.clone();
+        let block = Expr::Block(self.ast.get_scope());
+        // Go back to the previous scope
+        self.ast.pop_scope();
+        log!("end parse_block", "{:?}", block);
+        
         block
     }
 
@@ -971,7 +1032,7 @@ impl Parser {
     /// * Deconstruction
     /// - `({ident}, {ident}, ...) = {expr}`
     fn parse_assingment(&mut self) -> Stmt {
-        if self.ast.current_scope.borrow().is_empty() {
+        if self.ast.current_scope().is_empty() {
             error!(
                 &self.lexer,
                 "Expected an identifier before assingment operator.",
@@ -982,9 +1043,11 @@ impl Parser {
 
         let op = self.next_token().unwrap().value.clone();
 
-        let ident: Expr = self.ast.pop().unwrap().into();
+        let ident: Expr = self.ast.pop_node().unwrap().into();
 
-        // Signal definition
+        log!("parse_assingment", "{:?} {}", ident, op);
+
+        // * Signal definition
         // {Signal} = {expr}
         if let Expr::Signal(name) = ident {
             self.capturing_signals = Some(vec![]);
@@ -993,6 +1056,8 @@ impl Parser {
 
             let dependencies = self.capturing_signals.take().unwrap();
 
+            // * Signal update
+            // If signal is already defined, it's an update
             if self.defined_signals.contains(&name) {
                 if op != "=" {
                     value = Expr::BinOp {
