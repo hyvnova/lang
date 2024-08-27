@@ -5,6 +5,7 @@ pub mod cli;
 pub mod lexer;
 pub mod parser;
 pub mod ast;
+pub mod analyzer;
 
 pub mod transpilers;
 

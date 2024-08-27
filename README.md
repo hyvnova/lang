@@ -5,6 +5,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
 - Imports 
 - Meta-reactivity <- (Currently drafting)
 - [ x ] Reactive Statements
+- Conditionals
  
 # Syntax    
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
@@ -23,20 +24,19 @@ $ {
 }
 
 // Distribute
-res = | PI, Coords -> Direction, Distance; # Distribute PI and Coords into the Direction and Distance functions.
-      # res = (output of direction, output of distance)
+// Distribute PI and Coords into the Direction and Distance functions.
+// Same as: res = (Direction(PI, Coords), Distance(PI, Coords))
+res = | PI, Coords -> Direction, Distance; 
 
 // Distribute a arguments as iterable
-|> inputs, outputs -> f1, f2; // Iterate over inputs and outputs and distribute them into f1 and f2
+// Iterate over inputs and outputs and distribute them into f1 and f2
+// for args in zip(inputs, outputs): 
+//     f1(*args)
+//     f2(*args)
+|> inputs, outputs -> f1, f2; 
 
 // Deconstruct
-user = {
-    "name" : "Jonh",
-    "age" : 21,
-    "email" : "jonh@sample-email.com",
-    "role" : "Developer"
-}
-
+user = {"name" : "Jonh", "role" : "Developer" }
 {name, role} = user
 
 // Arrow Function
@@ -44,4 +44,17 @@ user = {
     print(name)
     print(role)
 }
+
+#[python]
+class Person:
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+    def __str__(self):
+        return f"{self.name} is {self.age} years old"
+  
+#[endpython]
+
+p = Person("Jonh", 21) // Yes, interop with python
 ```

@@ -48,7 +48,7 @@ pub struct Parser {
     // Used to keep track of "dependencies" of signals, so we can later on generate the correct code.
     capturing_signals: Option<Vec<String>>,
 
-    // Used to differentiate between signal definition and singal update
+    // Used to differentiate between signal definition and signal update
     // If a signal is defined, any type of assignment will be considered as a signal update
     defined_signals: Vec<String>,
 }
@@ -314,12 +314,13 @@ impl Parser {
                     continue;
                 }
 
-                // * Signal
-                // * Reactive statement
+                // * Parse Signal
+                // * Parse Reactive statement
                 // ${ident}
+                // $ { {block} }
                 TokenKind::DOLLAR_SING => {
 
-                    // * if next token is a "{" tne it's a reactive statement
+                    // * if next token is a "{" then it's a reactive statement
                     if let Some(TokenKind::L_BRACKET) = self.peek_token().map(|t| t.kind) {
 
                         log!("reactive statement");
@@ -364,7 +365,7 @@ impl Parser {
                     let ident = self.next_token().unwrap_or_else(|| {
                         error!(
                             &self.lexer,
-                            "Expected an identifier after signal operator.",
+                            "Expected an identifier (or block) after signal operator.",
                             format!("${:?}", token),
                             " ^^^ - This is not an identifier."
                         )
@@ -1054,7 +1055,27 @@ impl Parser {
 
             let mut value = self.parse_expr(None);
 
-            let dependencies = self.capturing_signals.take().unwrap();
+            let mut dependencies = self.capturing_signals.take().unwrap();
+
+            // Ensure there's no circular dependency
+            dependencies.retain(|dep| dep != &name);
+
+            // Circular dependency = Sa depends on Sb and Sb depends on Sa
+            self.defined_signals
+                .iter()
+                .filter(|sig| dependencies.contains(sig)) // Check if this signal depends on any other signal
+                .for_each(|sig| {
+                    let sig_deps = self.ast.find_signal_deps(sig);
+
+                    if sig_deps.contains(&name) {
+                        error!(
+                            &self.lexer,
+                            "Circular dependency detected.",
+                            format!("{:?} <-> {:?}", name, sig),
+                            "These signals depend on each other."
+                        );
+                    }
+                });
 
             // * Signal update
             // If signal is already defined, it's an update
