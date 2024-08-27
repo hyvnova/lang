@@ -16,14 +16,20 @@ macro_rules! bit {
     };
 }
 
-/// Creates an array of TokenKind. Thus tk (TokenKind) arr (array).
-/// `tokarr![NEW_LINE, SEMICOLON]` -> `Some(&[TokenKind::NEW_LINE, TokenKind::SEMICOLON])`
-/// This macro is supposed to be an easier way of passing `stop_at` argument to handlers.
+
+/// Macro to create a token kind array
 macro_rules! tkarr {
     ($($x:ident),*) => {
-        Some(&[$(TokenKind::$x),*])
+        vec![$(TokenKind::$x),*]
     };
 }
+
+macro_rules! add_stop {
+    ($self:expr, $($token:ident),*) => {
+        $self.stops.push(tkarr![$($token),*]);
+    };
+}
+
 
 pub struct Parser {
     // Token that was read but not processed
@@ -38,9 +44,17 @@ pub struct Parser {
     // Travel variables -- used to keep track of control flow
     stopped_at: Vec<TokenKind>, // if the parser stopped at a token, this will be the token. Works as a Stack.
 
+    // Vector of "stops at", works as a stack.
+    // When a handler needs to stop at a token, it will push an array of tokens to this vector.
+    // When the parser reaches a token in one of the arrays, it will stop and pop the array.
+    // The token that stopped the parser will be pushed to the `stopped_at` vector.
+    stops: Vec<Vec<TokenKind>>, 
+
     // Makes parse, parse_expr, parse_statement, etc. stop at a token.
-    // used to generally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
-    general_stop_at : Option<Vec<TokenKind>>, 
+    // used to globally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
+    // In difference of `stops`, this is a single buffer of tokens, meaning that it will stop at the first token in the buffer.
+    // This allows control over stops while letting handlers to push their own stops.
+    global_stop : Option<Vec<TokenKind>>, 
 
     capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
 
@@ -63,7 +77,8 @@ impl Parser {
             ast: AST::new(),
 
             stopped_at: Vec::new(),
-            general_stop_at: None,
+            global_stop: None,
+            stops: Vec::new(),
             
             capturing_sequence: false,
             capturing_signals: None,
@@ -114,13 +129,24 @@ impl Parser {
             log!("parse", "{:?}", token);
 
 
-            // General stop at
-            if let Some(stop_at) = &self.general_stop_at {
+            // * Global stop at
+            if let Some(stop_at) = &self.global_stop {
                 if stop_at.contains(&token.kind) {
                     self.next_token(); // Consume the token
                     self.stopped_at.push(token.kind); // Save the token that stopped the parser
                     break;
                 } 
+            }
+
+            // * Stop at
+            // If current token is in the stop buffer, stop the parser, pop the buffer and consume the token
+            if let Some(stop_at) = self.stops.last() {
+                if stop_at.contains(&token.kind) {
+                    self.next_token(); // Consume the token
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    self.stops.pop(); // Remove the stop buffer
+                    break;
+                }
             }
 
             // New lines
@@ -133,7 +159,7 @@ impl Parser {
                 let statement: Stmt = self.parse_statement();
                 self.ast.add_node(Node::Stmt(statement));
             } else if Lexer::is_expression_token(&token) {
-                let expr: Expr = self.parse_expr(None);
+                let expr: Expr = self.parse_expr();
 
                 log!("+ parse", "Adding expression to AST: {:?}", expr);
 
@@ -150,15 +176,24 @@ impl Parser {
     /// Statement token should be set as REMAINDER_TOKEN before calling this function.
     /// Captures the statement from token to the next semicolon.
     fn parse_statement(&mut self) -> Stmt {
-        log!("parse_statement", "");
+        log!("parse_statement");
 
         while let Some(token) = self.next_token() {
-            // General stop at
-            if let Some(stop_at) = &self.general_stop_at {
+            // * Global stop at
+            if let Some(stop_at) = &self.global_stop {
                 if stop_at.contains(&token.kind) {
-                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
-                    return Stmt::Empty; // Return empty statement
+                    // We put back token and end here so parse() can handle the stop
+                    self.put_back(token);
+                    return Stmt::Empty;
                 } 
+            }
+
+            // * Stop at
+            if let Some(stop_at) = self.stops.last() {
+                if stop_at.contains(&token.kind) {
+                    self.put_back(token);
+                    return Stmt::Empty;
+                }
             }
 
             if token.kind == TokenKind::SEMICOLON {
@@ -182,10 +217,13 @@ impl Parser {
 
                 // * Function definition
                 // `def {ident}({ident}, {ident}, ...) {block}`
-                TokenKind::DEF => {
-                    let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![L_PARENT]);
+                TokenKind::FN_DEF => {
+                    // Parse function name
+                    add_stop!(self, L_PARENT);
+                    let name = self.get_expr(&Expr::Identifier(String::new()));
 
-                    if self.stopped_at.is_empty() {
+                    // Since should stop at L_PARENT, if it's not there, raise an error
+                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != TokenKind::L_PARENT {
                         error!(
                             &self.lexer,
                             "Expected a parenthesis after function name.",
@@ -193,7 +231,21 @@ impl Parser {
                         );
                     }
 
+                    // Parse function arguments
                     let args = self.parse_paren();
+
+                    // If next token is not a "{", then there's no body. Raise an error
+                    if !self.peek_token().map(|t| t.kind == TokenKind::L_BRACKET).unwrap_or(false) {
+                        error!(
+                            &self.lexer,
+                            "Expected a block after function arguments.",
+                            format!("def {:?} ({:?})  <---", name, args)
+                        );
+                    }
+
+                    self.next_token(); // Consume the L_BRACKET
+
+                    // Parse function body
                     let body = self.parse_block();
 
                     log!(
@@ -207,51 +259,10 @@ impl Parser {
                     return Stmt::FunctionDef { name, args, body };
                 }
 
-                // * Import
-                // `import {expr}[as {expr}{; or new_line}`
-                TokenKind::IMPORT => {
-                    let expr = self.parse_expr(tkarr![SEMICOLON, NEW_LINE, AS]);
-
-                    if let Some(TokenKind::AS) = self.stopped_at.pop() {
-                        // let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
-                        let alias = self.parse_expr(None);
-
-                        return Stmt::Import(expr, Some(alias));
-                    }
-
-                    return Stmt::Import(expr, None);
-                }
-
-                // * From import
-                // `from {expr} import {expr}[as {expr}{; or new_line}`]
-                TokenKind::FROM => {
-                    let name = self.get_expr(&Expr::Identifier(String::new()), tkarr![IMPORT]);
-
-                    if self.stopped_at.is_empty() {
-                        error!(
-                            &self.lexer,
-                            "Expected 'import' after 'from'.".to_string(),
-                            format!("from {:?} ...", name)
-                        );
-                    }
-
-                    let thing = self.get_expr(
-                        &Expr::Identifier(String::new()),
-                        tkarr![SEMICOLON, NEW_LINE, AS],
-                    );
-
-                    if let Some(_) = self.stopped_at.pop() {
-                        let alias: Expr = self.get_expr(&Expr::Identifier(String::new()), None);
-                        return Stmt::From(name, thing, Some(alias));
-                    }
-
-                    return Stmt::From(name, thing, None);
-                }
-
                 // * Parsing exprs inside statment
                 _ if Lexer::is_expression_token(&token) => {
                     self.put_back(token);
-                    let expr = self.parse_expr(None);
+                    let expr = self.parse_expr();
                     self.ast.add_node(Node::Expr(expr));
 
                     continue;
@@ -270,11 +281,11 @@ impl Parser {
     ///
     /// ### Arguments
     /// `stop_at` is a tuple of token types that should stop the expression parsing.
-    fn parse_expr(&mut self, stop_at: Option<&[TokenKind]>) -> Expr {
+    fn parse_expr(&mut self) -> Expr {
         let mut buffer: Vec<Expr> = Vec::new();
 
-        let default_stop = tkarr![NEW_LINE, SEMICOLON].unwrap();
-        let stop_at = stop_at.or(tkarr![NEW_LINE, SEMICOLON]).unwrap();
+        let default_stop: Vec<TokenKind> = tkarr![NEW_LINE, SEMICOLON];
+        let stop_at: Vec<TokenKind> = self.stops.last().cloned().unwrap_or(default_stop.clone());
 
         // * Capture all tokens that make up the expression
         while let Some(token) = self.next_token() {
@@ -287,17 +298,22 @@ impl Parser {
                 self.stopped_at
             );
 
-            // General stop at
-            if let Some(stop_at) = &self.general_stop_at {
+            // * global stop at
+            if let Some(stop_at) = &self.global_stop {
                 if stop_at.contains(&token.kind) {
-                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    log!("! global stop");
+                    // We put back token and end here so parse() can handle the stop
+                    self.put_back(token);
                     return self.parse_expr_from_buffer(buffer);
                 } 
             }
 
-            // If should stop
-            if stop_at.contains(&token.kind) && !default_stop.contains(&token.kind) {
-                self.stopped_at.push(token.kind);
+            // * Stop at
+            if stop_at.contains(&token.kind)  {
+                if !default_stop.contains(&token.kind) {
+                    self.stops.pop(); // Remove the stop buffer
+                    self.stopped_at.push(token.kind);
+                }
                 return self.parse_expr_from_buffer(buffer);
             }
 
@@ -402,7 +418,7 @@ impl Parser {
                             &self.lexer,
                             "Expected args definition for Lambda function.",
                             format!("-> ..."),
-                            " ^^^ - Missing arguments here."
+                            "\t^^^ - Missing arguments here."
                         );
                     }
 
@@ -418,8 +434,31 @@ impl Parser {
                         );
                     }
 
-                    // Parse block or expr
-                    let body = self.parse_expr(Some(stop_at));
+                    // Parsing lambda body
+                    let body = if let Some(TokenKind::L_BRACKET) = self.peek_token().map(|t| t.kind) {
+                        
+                        // Block
+                        // TODO: Lambdas can't handle blocks as body
+                        // This is because lambdas in python don't support blocks
+                        self.next_token(); // Consume the L_BRACKET
+                        let block = self.parse_block();
+
+                        // If next token is stop token, added it as stop token
+                        if let Some(t) = self.peek_token() {
+                            if stop_at.contains(&t.kind) {
+                                self.next_token(); // Consume the stop token
+                                self.stopped_at.push(t.kind);
+                            }
+                        }
+
+                        block
+                    } else {
+                        // Expr
+                        // TODO: This is not good, since the body of the lambda can be a block or an expression
+                        // Unless lambda transpile as actual function, this is not good.
+                        // self.stops.push(stop_at); 
+                        self.parse_expr()
+                    };
 
                     if self.stopped_at.is_empty() && body != Expr::Block(Vec::new()) {
                         error!(
@@ -427,6 +466,8 @@ impl Parser {
                             "Expected a block or expression after Lambda function arguments."
                         );
                     }
+
+                    log!("Lambda function", "args={:?} body={:?}", args, body);
 
                     return Expr::Lambda {
                         args: bit!(args),
@@ -438,7 +479,8 @@ impl Parser {
                 // [expr, expr, ...]
                 TokenKind::L_SQUARE_BRACKET => {
                     log!("parse array");
-                    let expr = self.parse_expr(tkarr![R_SQUARE_BRACKET]);
+                    add_stop!(self, R_SQUARE_BRACKET);
+                    let expr = self.parse_expr();
 
                     // If not closing braket
                     if self.stopped_at.is_empty()
@@ -504,7 +546,9 @@ impl Parser {
                         inclusive = true;
                     }
 
-                    let end = self.parse_expr(Some(stop_at)); // this ensures that we can break, since we are complaying with the stop 
+                    // Might not be needed since we just haven't reached the stop token
+                    // self.stops.push(stop_at) 
+                    let end = self.parse_expr(); // this ensures that we can break, since we are complaying with the stop 
 
                     buffer.push(Expr::Range {
                         start: bit!(start),
@@ -586,7 +630,9 @@ impl Parser {
                         match ident {
                             Expr::Identifier(name) 
                             | Expr::Signal(name) => {
-                                let value = self.parse_expr(Some(stop_at));
+                                // Might not be needed since we just haven't reached the stop token
+                                // self.stops.push(stop_at) 
+                                let value = self.parse_expr();
                                 buffer.push(Expr::NamedArg(name, bit!(value)));
                             }
 
@@ -624,7 +670,9 @@ impl Parser {
                     }
 
                     let lhs = buffer.pop().unwrap();
-                    let member = self.parse_expr(Some(stop_at));
+                    // Might not be needed since we just haven't reached the stop token
+                    // self.stops.push(stop_at) 
+                    let member = self.parse_expr();
 
                     buffer.push(Expr::MemberAccess {
                         object: bit!(lhs),
@@ -640,7 +688,9 @@ impl Parser {
                 _ if Lexer::is_bitwise_operator(&token) && buffer.is_empty() => {
                     log!("Unary Operator", "{:?}", token);
 
-                    let expr = self.parse_expr(Some(stop_at));
+                    // Might not be needed since we just haven't reached the stop token
+                    // self.stops.push(stop_at) 
+                    let expr = self.parse_expr();
 
                     buffer.push(Expr::UnaryOp {
                         op: token.value.clone(),
@@ -654,7 +704,9 @@ impl Parser {
                     if buffer.is_empty() {
                         // If operator is "-" then it's a negation
                         if token.kind == TokenKind::SUBTRACT {
-                            let expr = self.parse_expr(Some(stop_at));
+                            // Might not be needed since we just haven't reached the stop token
+                            // self.stops.push(stop_at) 
+                            let expr = self.parse_expr();
                             return Expr::UnaryOp {
                                 op: '-'.to_string(),
                                 expr: bit!(expr),
@@ -663,8 +715,8 @@ impl Parser {
 
                         // If operapor is a "@" then it's a decorator
                         if token.kind == TokenKind::AT {
-                            let name =
-                                self.get_expr(&Expr::Identifier(String::new()), tkarr!(L_PARENT));
+                            add_stop!(self, L_PARENT);
+                            let name = self.get_expr(&Expr::Identifier(String::new()));
 
                             if let Some(TokenKind::L_PARENT) = self.stopped_at.pop() {
                                 let args = self.parse_paren();
@@ -687,8 +739,9 @@ impl Parser {
                             "^^^ -- Expression missing here "
                         );
                     }
-
-                    let binop = self.parse_binop(buffer.pop().unwrap(), token, Some(stop_at));
+                    // Might not be needed since we just haven't reached the stop token
+                    // self.stops.push(stop_at) 
+                    let binop = self.parse_binop(buffer.pop().unwrap(), token);
                     buffer.push(binop);
                     continue;
 
@@ -765,7 +818,8 @@ impl Parser {
     fn parse_distribution(&mut self, is_iter: bool) -> Expr {
         log!("parse_distribution");
 
-        let args_expr = self.parse_expr(tkarr![R_ARROW]);
+        add_stop!(self, R_ARROW);
+        let args_expr = self.parse_expr();
 
         if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::R_ARROW {
             error!(
@@ -780,7 +834,8 @@ impl Parser {
             _ => vec![args_expr],
         };
 
-        let rec_expr = self.parse_expr(tkarr![SEMICOLON, NEW_LINE]);
+        add_stop!(self, SEMICOLON, NEW_LINE);
+        let rec_expr = self.parse_expr();
 
         if self.stopped_at.is_empty() {
             error!(
@@ -822,7 +877,8 @@ impl Parser {
     fn parse_paren(&mut self) -> Expr {
         log!("parse_paren");
 
-        let expr = self.parse_expr(tkarr![R_PARENT]);
+        add_stop!(self, R_PARENT);
+        let expr = self.parse_expr();
 
         self.capturing_sequence = true;
 
@@ -839,7 +895,7 @@ impl Parser {
                 &self.lexer,
                 "Expected closing parenthesis.",
                 "( ... ",
-                "Expected a closing parenthesis here."
+                format!("stoppped_at={:?}", self.stopped_at)
             )
         }
     }
@@ -855,11 +911,11 @@ impl Parser {
         log!("parse_block");
 
         self.ast.new_scope();
-        self.general_stop_at = Some(vec![TokenKind::R_BRACKET]);
+        self.global_stop = Some(vec![TokenKind::R_BRACKET]);
         self.parse();
 
         // No stop token
-        if self.stopped_at.is_empty() {
+        if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::R_BRACKET {
             error!(
                 &self.lexer,
                 "Expected a closing bracket.",
@@ -867,18 +923,8 @@ impl Parser {
                 "Expected a closing bracket here."
             );
         }
-        // If correct stop token -> pop it
-        // Otherwise, raise an error
-        if let Some(TokenKind::R_BRACKET) = self.stopped_at.pop() {
-            self.general_stop_at = None;
-        } else {
-            error!(
-                &self.lexer,
-                "Expected a closing bracket.",
-                "{ ...",
-                "Expected a closing bracket here."
-            );
-        }
+        self.global_stop = None;
+        self.stopped_at.pop(); // Consume the R_BRACKET
 
         let block = Expr::Block(self.ast.get_scope());
         // Go back to the previous scope
@@ -900,7 +946,8 @@ impl Parser {
         log!("parse_dict");
 
         loop {
-            let key = self.parse_expr(tkarr![COLON, COMMA, R_BRACKET]);
+            add_stop!(self, COLON, COMMA, R_BRACKET);
+            let key = self.parse_expr();
 
             let stop_token = match self.stopped_at.pop() {
                 Some(t) => t,
@@ -942,7 +989,8 @@ impl Parser {
 
                 // key : value
                 TokenKind::COLON => {
-                    let value = self.parse_expr(tkarr![COMMA, R_BRACKET]);
+                    add_stop!(self, COMMA, R_BRACKET);
+                    let value = self.parse_expr();
                     log!("parse_dict", "key={:?} value={:?}", key, value);
                     keys.push(key);
                     values.push(value);
@@ -961,8 +1009,8 @@ impl Parser {
 
     /// Parse a binary operator expression.
     /// Should be called after encountering an operator token.
-    fn parse_binop(&mut self, left: Expr, operator: Token, stop_at: Option<&[TokenKind]>) -> Expr {
-        let right = self.parse_expr(stop_at);
+    fn parse_binop(&mut self, left: Expr, operator: Token) -> Expr {
+        let right = self.parse_expr();
         Expr::BinOp {
             left: Box::new(left),
             op: operator.value,
@@ -985,14 +1033,97 @@ impl Parser {
         }
     }
 
+
+    /// Parses a conditional statement or expression.
+    /// Should be called after encountering an IF token.
+    /// ```txt
+    /// if {expr} {block} [elif {expr} {block} ...] [else {block}]
+    fn parse_conditional(&mut self) -> Expr {
+        log!("parse_conditional");
+
+        add_stop!(self, L_BRACKET);
+        let condition = self.parse_expr();
+
+        if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::L_BRACKET {
+            error!(
+                &self.lexer,
+                "Expected a block after condition.",
+                format!("if {:?} ...", condition)
+            );
+        }
+
+        let block = self.parse_block();
+
+        // Vec<(Condition, Block)>
+        let mut elifs: Vec<(Expr, Expr)> = Vec::new();
+
+        // Parse elifs
+        while let Some(token) = self.peek_token() {
+            if token.kind != TokenKind::ELIF {
+                break;
+            }
+
+            self.next_token(); // Consume the ELIF token
+
+            add_stop!(self, L_BRACKET);
+            let condition = self.parse_expr();
+
+            if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::L_BRACKET {
+                error!(
+                    &self.lexer,
+                    "Expected a block after condition.",
+                    format!("elif {:?} ...", condition)
+                );
+            }
+
+            let block = self.parse_block();
+            elifs.push((condition, block));
+        }
+
+        // Parse else
+        let mut else_block: Option<Box<Expr>> = None;
+        if let Some(TokenKind::ELSE) = self.peek_token().map(|t| t.kind) {
+            self.next_token(); // Consume the ELSE token
+
+            // If there's a block after else
+            if let Some(TokenKind::L_BRACKET) = self.peek_token().map(|t| t.kind) {
+                self.next_token(); // Consume the L_BRACKET
+                let block = self.parse_block();
+                else_block = Some(bit!(block));
+            }
+
+            // Otherwise, error
+            error!(
+                &self.lexer,
+                "Expected a block after else.",
+                format!("else ...")
+            );
+        }
+
+        log!(
+            "end parse_conditional",
+            "condition={:?} block={:?} elifs={:?}",
+            condition,
+            block,
+            elifs
+        );
+
+        Expr::Conditional {
+            condition: bit!(condition),
+            body: bit!(block),
+            elifs,
+            else_body: else_block,
+        }
+
+
+    }
+
     /// Get an expression of type `expr_type` from the token stream if it exists, otherwise return None.
-    /// `stop_at` is a tuple of token types that should stop the expression parsing.
     fn get_optional_expr(
         &mut self,
         expr_type: &Expr,
-        stop_at: Option<&[TokenKind]>,
     ) -> Option<Expr> {
-        let expr = self.parse_expr(stop_at);
+        let expr = self.parse_expr();
 
         if expr == Expr::Empty || expr != *expr_type {
             error!(
@@ -1005,9 +1136,8 @@ impl Parser {
     }
 
     /// Get an expression of type `expr_type` from the token stream. If not found, raise an error.
-    /// `stop_at` is a tuple of token types that should stop the expression parsing.
-    fn get_expr(&mut self, expr_type: &Expr, stop_at: Option<&[TokenKind]>) -> Expr {
-        let expr = self.get_optional_expr(&expr_type, stop_at);
+    fn get_expr(&mut self, expr_type: &Expr) -> Expr {
+        let expr = self.get_optional_expr(&expr_type);
 
         if expr.is_none() {
             error!(
@@ -1033,6 +1163,7 @@ impl Parser {
     /// * Deconstruction
     /// - `({ident}, {ident}, ...) = {expr}`
     fn parse_assingment(&mut self) -> Stmt {
+
         if self.ast.current_scope().is_empty() {
             error!(
                 &self.lexer,
@@ -1053,7 +1184,7 @@ impl Parser {
         if let Expr::Signal(name) = ident {
             self.capturing_signals = Some(vec![]);
 
-            let mut value = self.parse_expr(None);
+            let mut value = self.parse_expr();
 
             let mut dependencies = self.capturing_signals.take().unwrap();
 
@@ -1103,7 +1234,7 @@ impl Parser {
             }
         }
 
-        let value = self.parse_expr(None);
+        let value = self.parse_expr();
 
         // Single assingment
         if ident == Expr::Identifier(String::new())

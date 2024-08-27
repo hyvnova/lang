@@ -13,18 +13,25 @@ pub enum TokenKind {
     // Statement
     _stmt_start, // index to start of statement tokens
     //   Instructions
-    DEF,
-    IMPORT,   // import
+    FN_DEF,    // fn
+
     CONTINUE, // continue
     BREAK,    // break
     LOOP,     // loop
-    FROM,     // from
-    AS,       // as  (for aliasing)
+    FOR,      // for
+    WHILE,    // while
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
     _expr_start, // index to start of expression tokens
+
+    // Condtionals are here because can be used as expressions
+    IF,      // if
+    ELSE,     // else
+    ELIF,     // elif
+
     ASSIGN,   // =, +=, -=, *=, /=, **=, %=
+
     _stmt_end, // index to end of statement tokens
 
     // Expressions
@@ -119,10 +126,12 @@ const KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "loop" => TokenKind::LOOP,
     "continue" => TokenKind::CONTINUE,
     "break" => TokenKind::BREAK,
-    "def" => TokenKind::DEF,
-    "import" => TokenKind::IMPORT,
-    "from" => TokenKind::FROM,
-    "as" => TokenKind::AS,
+    "for" => TokenKind::FOR,
+    "while" => TokenKind::WHILE,
+    "if" => TokenKind::IF,
+    "else" => TokenKind::ELSE,
+    "elif" => TokenKind::ELIF,
+    "fn" => TokenKind::FN_DEF,
 };
 
 impl PartialEq for TokenKind {
@@ -168,6 +177,7 @@ pub struct Lexer {
 
     // If lexer is currently capturing a string
     capturing_string: bool,
+    capturing_number: bool,
 }
 
 impl Lexer {
@@ -182,6 +192,7 @@ impl Lexer {
             current_token_value: None,
 
             capturing_string: false,
+            capturing_number: false,
         }
     }
 
@@ -229,8 +240,9 @@ impl Lexer {
 
         // * Number
         if ch.is_numeric() {
+            self.capturing_number = true;
             self.capture(ch, |char| char.is_numeric() || char == '.'); 
-
+            self.capturing_number = false;
             return TokenKind::NUMBER;
         }
 
@@ -567,6 +579,17 @@ impl Lexer {
         loop {
             let ch = self.next_char();
 
+            // When capturing a number ensure that after a dot there's a number
+            // Otherwise it's not a float but a number followed by a dot
+            if self.capturing_number && ch.is_some() && ch.unwrap() == '.' {
+                let next_ch = self.peek_next_char();
+                if next_ch.is_none() || !next_ch.unwrap().is_numeric() {
+                    self.current_char_index -= 1; // Move back, since char is not part of value
+                    self.column -= 1;
+                    break;
+                }
+            }
+
             if ch.is_none() || (!condition(ch.unwrap()) && value.chars().last().unwrap_or(' ') != '\\') {
                 self.current_char_index -= 1; // Move back, since char is not part of value
                 self.column -= 1;
@@ -618,7 +641,7 @@ impl Lexer {
             && (token.kind as i16) < TokenKind::_op_end as i16;
     }
 
-    /// Statement token represent an instruction, such as `def`, `assign`, etc.
+    /// Statement token represent an instruction, such as `fn`, `assign`, etc.
     pub fn is_statement_token(token: &Token) -> bool {
         return token.kind as i16 > TokenKind::_stmt_start as i16
             && (token.kind as i16) < TokenKind::_stmt_end as i16;

@@ -1,0 +1,21 @@
+Stmt(SignalDef { name: "y", value: Number("1"), dependencies: [] })
+Expr(Empty)
+Stmt(FunctionDef {
+     name: Identifier("f"), 
+     args: Group(Identifier("x")), 
+     body: Block(
+        [
+            Expr(BinOp { left: Signal("y"), op: "+", right: Identifier("x") }), 
+            Expr(FunctionCall { name: Identifier("print"), args: Group(FunctionCall { name: Identifier("f"), args: Group(Number("2")) }) }), 
+            Stmt(SignalUpdate { name: "y", value: Number("2"), dependencies: [] }), 
+            Expr(Empty), 
+            Expr(FunctionCall { 
+                name: Identifier("print"), 
+                args: Group(FunctionCall { 
+                    name: Identifier("f"), 
+                    args: Group(Number("2")) 
+                }) 
+            })
+        ]
+    )
+})

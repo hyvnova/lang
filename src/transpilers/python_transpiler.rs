@@ -120,13 +120,23 @@ impl Transpile for Expr {
             // TODO: Don't know how to implement this yet
             Block(nodes) => {
                 let mut code = String::new();
-                for node in nodes.iter() {
-                    code.push_str(&node.transpile());
+
+                if nodes.is_empty() {
+                    code.push_str("\tpass\n");
+                    return code;
                 }
+
+                for node in nodes[0..nodes.len()-1].iter() {
+                    code.push_str(format!("\t{}\n", node.transpile()).as_str());
+                }
+
+                // Last node is returned
+                code.push_str(format!("\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
+
                 code
             }
 
-            FunctionCall { name, args } => format!("{}{}\n", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+            FunctionCall { name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");
@@ -219,6 +229,30 @@ impl Transpile for Expr {
             }
             
             Signal(name) => format!("{}.value", name),
+
+            Conditional{
+                condition,
+                body,
+                elifs,
+                else_body
+            } => {
+                let mut code = String::new();
+
+                // if
+                code.push_str(format!("if {}:\n\t{}\n", condition.transpile(), body.transpile()).as_str());
+            
+                // elifs
+                for (cond, body) in elifs.iter() {
+                    code.push_str(format!("elif {}:\n\t{}\n", cond.transpile(), body.transpile()).as_str());
+                }
+
+                // else
+                if let Some(else_body) = else_body {
+                    code.push_str(format!("else:\n\t{}\n", else_body.transpile()).as_str());
+                }
+
+                code
+            }
         }
     }
 }
@@ -266,12 +300,7 @@ impl Transpile for Stmt {
 
             FunctionDef { name, args, body } => {
                 let mut code = String::new();
-                code.push_str("def ");
-                code.push_str(&name.transpile());
-                code.push_str(&args.transpile());
-                code.push_str(":\n");
-                code.push_str(&body.transpile());
-
+                code.push_str(format!("def {}{}:\n{}", name.transpile(), args.transpile(), body.transpile()).as_str());
                 code
             }
 

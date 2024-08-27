@@ -1,11 +1,18 @@
 # Lang
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
-### TODO 
-- Imports 
+### TODO / LOG
+- Imports - DISCARDED
 - Meta-reactivity <- (Currently drafting)
-- [ x ] Reactive Statements
+    - [ x ] Reactive Statements
 - Conditionals
+    -  If
+    - Else
+    - Elif
+- loops 
+    - loop
+    - while
+    - for
  
 # Syntax    
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)

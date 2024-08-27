@@ -8,23 +8,16 @@ from signals import *
 from typecasting import * 
 # End of custom builtins
 
-#  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
-
-x = Signal(lambda x: Iterator(tuple(range(0, 10)))) 
+y = Signal(lambda y: 1) 
 
 
-#  0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20
-
-y = Signal(lambda y: x.value.map(lambda n: n * 2)
-, x) 
-
+def f(x):
+	return y.value + x
 
 def _lang_reactive_stmt():
-	print()
-	print(x.value, y.value, sep = "\n")
+	print(f(2))
+ReactiveStmt(_lang_reactive_stmt, )
 
-ReactiveStmt(_lang_reactive_stmt, y)
+y.update(lambda y: y.value + n) 
 
-x.update(lambda x: Iterator(tuple(range(2, 20)))) 
-
-
+(Iterator(tuple(range(0, 10)))).map(lambda n: )

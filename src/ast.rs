@@ -109,6 +109,16 @@ pub enum Expr {
     /// Signal
     /// ${name}
     Signal(String),
+
+
+    /// Condtional
+    /// if {condition} {body} [elif {condition} {body}]* [else {body}]
+    Conditional {
+        condition: Box<Expr>,
+        body: Box<Expr>,
+        elifs: Vec<(Expr, Expr)>,
+        else_body: Option<Box<Expr>>,
+    },
 }
 
 
