@@ -103,7 +103,7 @@ pub enum Expr {
     /// Anon function
     Lambda {
         args: Box<Expr>,
-        body: Box<Expr>,
+        body: Box<Node>,
     },
     
     /// Signal

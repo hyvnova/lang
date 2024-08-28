@@ -65,7 +65,8 @@ class ReactiveStmt:
             signal.listeners.add(self) 
 
         self.callback = callback
-        self()
+        # Execute on declaration
+        self() 
 
     def __call__(self):
         self.value = self.callback()

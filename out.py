@@ -8,16 +8,20 @@ from signals import *
 from typecasting import * 
 # End of custom builtins
 
-y = Signal(lambda y: 1) 
+#  Fibonacci
 
 
-def f(x):
-	return y.value + x
+a = Signal(lambda a: 1) 
+
+
+b = Signal(lambda b: 1) 
+
 
 def _lang_reactive_stmt():
-	print(f(2))
-ReactiveStmt(_lang_reactive_stmt, )
+	a.update(lambda a: a.value + b.value, b)
+	
+	print(a.value)
+	b.update(lambda b: b.value + a.value, a)
+	
+ReactiveStmt(_lang_reactive_stmt, a, b)
 
-y.update(lambda y: y.value + n) 
-
-(Iterator(tuple(range(0, 10)))).map(lambda n: )

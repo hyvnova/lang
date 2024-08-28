@@ -127,11 +127,11 @@ impl Transpile for Expr {
                 }
 
                 for node in nodes[0..nodes.len()-1].iter() {
-                    code.push_str(format!("\t{}\n", node.transpile()).as_str());
+                    code.push_str(format!("\n\t{}", node.transpile()).as_str());
                 }
 
                 // Last node is returned
-                code.push_str(format!("\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
+                code.push_str(format!("\n\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
 
                 code
             }
@@ -300,7 +300,7 @@ impl Transpile for Stmt {
 
             FunctionDef { name, args, body } => {
                 let mut code = String::new();
-                code.push_str(format!("def {}{}:\n{}", name.transpile(), args.transpile(), body.transpile()).as_str());
+                code.push_str(format!("def {}{}:{}", name.transpile(), args.transpile(), body.transpile()).as_str());
                 code
             }
 
@@ -335,7 +335,7 @@ impl Transpile for Stmt {
             }
 
             SignalUpdate { name, value, dependencies } => {
-                format!("{0}.update(lambda {0}: {1}{2}) \n", 
+                format!("{0}.update(lambda {0}: {1}{2})", 
                     name, 
                     value.transpile(), 
                     if dependencies.is_empty() {
@@ -347,9 +347,9 @@ impl Transpile for Stmt {
             }
 
             ReactiveStmt { block, dependencies } => {
-                let mut code = String::from("def _lang_reactive_stmt():\n");
+                let mut code = String::from("def _lang_reactive_stmt():");
                 for node in block.iter() {
-                    code.push_str(format!("\t{0}", node.transpile()).as_str());
+                    code.push_str(format!("\n\t{0}", node.transpile()).as_str());
                 }
 
                 code.push_str(format!("\nReactiveStmt(_lang_reactive_stmt, {})", dependencies.join(", ")).as_str());

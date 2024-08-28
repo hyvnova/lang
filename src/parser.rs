@@ -7,6 +7,15 @@ use crate::{
     log,
 };
 
+use std::collections::HashSet;
+
+fn filter_repeated_strings(vec: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    vec.into_iter()
+        .filter(|s| seen.insert(s.clone())) // insert returns false if the value was already in the set
+        .collect()
+}
+
 /// Box-It, bit!
 /// Used to box an expression
 macro_rules! bit {
@@ -30,10 +39,9 @@ macro_rules! add_stop {
     };
 }
 
-
 pub struct Parser {
     // Token that was read but not processed
-    remanider_token: Option<Token>,
+    remainder_token: Option<Token>,
 
     // lexer
     pub lexer: Lexer,
@@ -58,9 +66,10 @@ pub struct Parser {
 
     capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
 
-    // if the parser is capturing signals, this will be a list of signals.
+    // When a handler wants to capture signals, it will push a new vector to this variable.
+    // The vector will be filled with the signals that the parser captures.
     // Used to keep track of "dependencies" of signals, so we can later on generate the correct code.
-    capturing_signals: Option<Vec<String>>,
+    capturing_signals: Vec<Vec<String>>,
 
     // Used to differentiate between signal definition and signal update
     // If a signal is defined, any type of assignment will be considered as a signal update
@@ -72,7 +81,7 @@ impl Parser {
         let lexer = Lexer::new(source);
 
         Parser {
-            remanider_token: None,
+            remainder_token: None,
             lexer,
             ast: AST::new(),
 
@@ -81,7 +90,7 @@ impl Parser {
             stops: Vec::new(),
             
             capturing_sequence: false,
-            capturing_signals: None,
+            capturing_signals: Vec::new(),
 
             defined_signals: Vec::new(),
         }
@@ -95,7 +104,7 @@ impl Parser {
     }
 
     pub fn next_token(&mut self) -> Option<Token> {
-        if let Some(token) = self.remanider_token.take() {
+        if let Some(token) = self.remainder_token.take() {
             return Some(token);
         }
 
@@ -105,7 +114,7 @@ impl Parser {
     /// Puts back a token that was read but not processed
     pub fn put_back(&mut self, token: Token) {
         // println!("[put_back] {:?}", token);
-        self.remanider_token = Some(token);
+        self.remainder_token = Some(token);
     }
 
     /// Returns the next token without consuming it
@@ -342,22 +351,24 @@ impl Parser {
                         log!("reactive statement");
 
                         self.next_token(); // Consume the L_BRACKET
-                        self.capturing_signals = Some(vec![]);
+                        self.capturing_signals.push(Vec::new()); // Start capturing signals
 
                         let block = match self.parse_block() {
                             Expr::Block(block) => block,
                             _ => error!(&self.lexer, "Expected a block when declaring a reactive statement"),
                         };
 
-                        let dependencies: Vec<String> = self.capturing_signals.take().unwrap();
+                        let dependencies: Vec<String> = self.capturing_signals.pop().unwrap_or_else(|| {
+                            error!(&self.lexer, "No signals captured when declaring a reactive statement / no buffer")
+                        });
 
                         // Filter "dirty" signals
                         // dirty sginals are signals that depend on another signal which is already part of the dependencies
-                        let dependencies: Vec<String> = dependencies
+                        // or signals that are repeated
+                        let dependencies: Vec<String> = filter_repeated_strings(dependencies.clone())
                             .iter()
+                            .cloned()
                             .filter(|dep| {
-                                let dep = dep.clone(); // Current dependency being checked
-
                                 // Check if the current dependency is already covered by any other dependency
                                 !dependencies.iter().any(|signal| {
                                     // Skip if it's the same signal to avoid self-comparison
@@ -370,7 +381,6 @@ impl Parser {
                                     signal_deps.contains(&dep)
                                 })
                             })
-                            .cloned() // Clone the remaining dependencies to collect
                             .collect();
 
                         self.ast.add_node(Node::Stmt(Stmt::ReactiveStmt { block, dependencies }));
@@ -398,8 +408,8 @@ impl Parser {
 
                     log!("signal", "{:?}", ident);
 
-                    if let Some(signals) = &mut self.capturing_signals {
-                        signals.push(ident.value.clone());
+                    if !self.capturing_signals.is_empty() {
+                        self.capturing_signals.last_mut().unwrap().push(ident.value.clone());
                     }
 
                     buffer.push(Expr::Signal(ident.value.clone()));
@@ -451,16 +461,21 @@ impl Parser {
                             }
                         }
 
-                        block
+                        Node::Expr(block)
                     } else {
                         // Expr
                         // TODO: This is not good, since the body of the lambda can be a block or an expression
                         // Unless lambda transpile as actual function, this is not good.
                         // self.stops.push(stop_at); 
-                        self.parse_expr()
+                        let e = self.parse_expr();
+                        match e {
+                            // This is even worse... Seriously? getting the last stmt just to put something in the body?
+                            Expr::Empty => self.ast.pop_node().unwrap(),
+                            _ => Node::Expr(e),
+                        }
                     };
 
-                    if self.stopped_at.is_empty() && body != Expr::Block(Vec::new()) {
+                    if self.stopped_at.is_empty() {
                         error!(
                             &self.lexer,
                             "Expected a block or expression after Lambda function arguments."
@@ -919,8 +934,7 @@ impl Parser {
             error!(
                 &self.lexer,
                 "Expected a closing bracket.",
-                "{ ...",
-                "Expected a closing bracket here."
+                "{ ... <- Expected \"}\" here"
             );
         }
         self.global_stop = None;
@@ -1182,11 +1196,13 @@ impl Parser {
         // * Signal definition
         // {Signal} = {expr}
         if let Expr::Signal(name) = ident {
-            self.capturing_signals = Some(vec![]);
+            self.capturing_signals.push(Vec::new());
 
             let mut value = self.parse_expr();
 
-            let mut dependencies = self.capturing_signals.take().unwrap();
+            let mut dependencies = self.capturing_signals.pop().unwrap_or_else(|| {
+                error!(&self.lexer, "No signals captured when declaring a signal / no buffer")
+            });
 
             // Ensure there's no circular dependency
             dependencies.retain(|dep| dep != &name);
