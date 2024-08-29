@@ -2,6 +2,7 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO / LOG
+- Parser Refactor <-
 - Conditionals
     -  If
     - Else

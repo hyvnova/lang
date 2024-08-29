@@ -1,7 +1,7 @@
 /// Transpile to Python
 /// This mode implements the Transpile trait for the AST Node, Stmt and Expr
 /// It converts the AST to a string representation of the code in Python
-use crate::ast::{Expr, Node, Stmt, AST};
+use crate::_ast::{Expr, Node, Stmt, AST};
 use std::fs;
 use std::path::Path;
 
@@ -126,12 +126,12 @@ impl Transpile for Expr {
                     return code;
                 }
 
-                for node in nodes[0..nodes.len()-1].iter() {
+                for node in nodes.iter() {
                     code.push_str(format!("\n\t{}", node.transpile()).as_str());
                 }
 
                 // Last node is returned
-                code.push_str(format!("\n\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
+                // code.push_str(format!("\n\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
 
                 code
             }
@@ -243,12 +243,12 @@ impl Transpile for Expr {
             
                 // elifs
                 for (cond, body) in elifs.iter() {
-                    code.push_str(format!("elif {}:\n\t{}\n", cond.transpile(), body.transpile()).as_str());
+                    code.push_str(format!("elif {}:{}\n", cond.transpile(), body.transpile()).as_str());
                 }
 
                 // else
                 if let Some(else_body) = else_body {
-                    code.push_str(format!("else:\n\t{}\n", else_body.transpile()).as_str());
+                    code.push_str(format!("else:{}\n", else_body.transpile()).as_str());
                 }
 
                 code
@@ -353,6 +353,24 @@ impl Transpile for Stmt {
                 }
 
                 code.push_str(format!("\nReactiveStmt(_lang_reactive_stmt, {})", dependencies.join(", ")).as_str());
+                code
+            }
+
+            Conditional { condition, body, elifs, else_body } => {
+                let mut code = String::new();
+
+                // if
+                code.push_str(format!("if {}:{}\n", condition.transpile(), body.transpile()).as_str());
+                // elifs
+                for (cond, body) in elifs.iter() {
+                    code.push_str(format!("elif {}:{}\n", cond.transpile(), body.transpile()).as_str());
+                }
+
+                // else
+                if let Some(else_body) = else_body {
+                    code.push_str(format!("else:{}\n", else_body.transpile()).as_str());
+                }
+
                 code
             }
         }

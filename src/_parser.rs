@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    ast::{Node, AST},
+    _ast::{Expr, Node, Stmt, AST},
     error,
     _lexer::{Lexer, Token, TokenKind},
     log,
@@ -56,7 +56,7 @@ pub struct Parser {
     // When a handler needs to stop at a token, it will push an array of tokens to this vector.
     // When the parser reaches a token in one of the arrays, it will stop and pop the array.
     // The token that stopped the parser will be pushed to the `stopped_at` vector.
-    stops: Vec<&[TokenKind]>, 
+    stops: Vec<Vec<TokenKind>>, 
 
     // Makes parse, parse_expr, parse_statement, etc. stop at a token.
     // used to globally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
@@ -132,181 +132,52 @@ impl Parser {
         copy
     }
 
-    /// Parses until one `stop_at` token is found.
-    /// Returns the scope of the tokens that were parsed until the stop token was found.
-    /// Does not ensure that it stopped at one of the stop tokens.
-    pub fn parse_until(&mut self, stop_at: &[TokenKind]) -> Option<Vec<Node>> {
-        self.stops.push(stop_at);
-        self.ast.new_scope();
-        self.parse();
-        self.stops.pop()
-    }
-
     pub fn parse(&mut self) {
         // * Parse start
-        while let Some(token) = self.next_token() {
+        while let Some(token) = self.peek_token() {
+            log!("parse", "{:?}", token);
+
+
             // * Global stop at
             if let Some(stop_at) = &self.global_stop {
                 if stop_at.contains(&token.kind) {
-                    self.stopped_at.push(token.kind);
-                    return;
+                    self.next_token(); // Consume the token
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    break;
                 } 
             }
 
             // * Stop at
+            // If current token is in the stop buffer, stop the parser, pop the buffer and consume the token
             if let Some(stop_at) = self.stops.last() {
                 if stop_at.contains(&token.kind) {
-                    self.stopped_at.push(token.kind);
-                    return;
+                    self.next_token(); // Consume the token
+                    self.stopped_at.push(token.kind); // Save the token that stopped the parser
+                    self.stops.pop(); // Remove the stop buffer
+                    break;
                 }
             }
 
-            use TokenKind::*;
-            match token.kind {
-                EOF => {
-                    break;
-                }
+            // New lines
+            if token.kind == TokenKind::NEW_LINE {
+                self.next_token();
+                continue;
+            }
 
-                // * Comments
-                COMMENT | ML_COMMENT => {
-                    self.ast.add_node(Node::Comment(token.value.clone()));
-                }
+            if Lexer::is_statement_token(&token) {
+                let statement: Stmt = self.parse_statement();
+                self.ast.add_node(Node::Stmt(statement));
+            } else if Lexer::is_expression_token(&token) {
+                let expr: Expr = self.parse_expr();
 
-                NEW_LINE | SEMICOLON => {
-                    self.ast.add_node(Node::Newline);
-                }
-            
-                _stmt_start => unreachable!(),
+                log!("+ parse", "Adding expression to AST: {:?}", expr);
 
+                self.ast.add_node(Node::Expr(expr));
+            } else {
+                log!("! parse", "Unknown token: {:?}", token);
+            }
 
-                // * Funciton Definition
-                // `def {ident}( {[{ident},]* ) {block}`
-                FN_DEF => {
-                    // parse function name
-                    let ident_scope = self.parse_until(&[L_PARENT]);
-                    
-                    // Ensure token in scope was an identifier
-                    let name = match ident_scope.into_iter().next().unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected an identifier for function name. There's none.")
-                    }) {
-                        Node::Identifier(name) => name,
-                        other => error!(&self.lexer, format!("Expected an identifier for function name. Got: {:?}", other)),
-                    };
-
-                    // Ensure there's a parenthesis after the function name
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != TokenKind::L_PARENT {
-                        error!(&self.lexer, "Expected a parenthesis after function name.");
-                    }
-
-                    // Parse function arguments
-                    let args_scope = self.parse_until(&[R_PARENT]);
-
-                    // Args must a WrappedSequence or a Group
-                    let args: Vec<_> = match args_scope.into_iter().next().unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected a sequence of arguments for function. There's none.")
-                    }) {
-                        Node::WrappedSequence(args) 
-                        | Node::Group(args) => args,
-                        other => error!(&self.lexer, format!("Expected a sequence of arguments for function. Got: {:?}", other)),
-                    };
-
-                    // Ensure parenthesis was closed
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != TokenKind::R_PARENT {
-                        error!(&self.lexer, "Expected a closing parenthesis after function arguments.");
-                    }
-
-                    // Ensure there's a block after the arguments
-                    if !self.peek_token().map(|t| t.kind == TokenKind::L_BRACKET).unwrap_or(false) {
-                        error!(&self.lexer, "Expected a block after function arguments.");
-                    }
-
-                    self.next_token(); // Consume the L_BRACKET
-
-                    // Parse function body
-                    let body: Vec<Node> = self.parse_until(&[R_BRACKET]).unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected a block for function body. There's none.")
-                    });
-
-                    // Ensure block was closed
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != TokenKind::R_BRACKET {
-                        error!(&self.lexer, "Expected a closing bracket to close function body.");
-                    }
-
-                    // Add function to AST
-                    self.ast.add_node(Node::FunctionDef { name, args, body });
-                    continue;
-                }
-                
-                CONTINUE => todo!(),
-                BREAK => todo!(),
-                LOOP => todo!(),
-                FOR => todo!(),
-                WHILE => todo!(),
-                PYTHON => todo!(),
-                
-                _expr_start => unreachable!(),
-
-                IF => todo!(),
-                ELSE => todo!(),
-                ELIF => todo!(),
-                ASSIGN => todo!(),
-                
-                _stmt_end => unreachable!(),
-
-                L_PARENT => todo!(),
-                R_PARENT => todo!(),
-                L_BRACKET => todo!(),
-                R_BRACKET => todo!(),
-                L_SQUARE_BRACKET => todo!(),
-                R_SQUARE_BRACKET => todo!(),
-
-                _value_start => todo!(),
-
-                IDENTIFIER => { self.ast.add_node(Node::Identifier(token.value.clone())); }
-                NUMBER => { self.ast.add_node(Node::Number(token.value.clone())); }
-                STRING => { self.ast.add_node(Node::String(token.value.clone())); }
-
-                _value_end => todo!(),
-
-                SINGLE_QUOTE => todo!(),
-                DOUBLE_QUOTE => todo!(),
-                BACK_TICK => todo!(),
-
-                _op_start => todo!(),
-
-                ADD => todo!(),
-                SUBTRACT => todo!(),
-                DIVIDE => todo!(),
-                POW => todo!(),
-                MOD => todo!(),
-                EQ => todo!(),
-                NE => todo!(),
-                LT => todo!(),
-                LE => todo!(),
-                GT => todo!(),
-                GE => todo!(),
-                _bitwise_start => todo!(),
-                MULTIPLY => todo!(),
-                NEG => todo!(),
-                AND => todo!(),
-                PIPE => todo!(),
-                XOR => todo!(),
-                NOT => todo!(),
-                _bitwise_end => todo!(),
-                AT => todo!(),
-                _op_end => todo!(),
-                COLON => todo!(),
-                COMMA => todo!(),
-                D_DOT => todo!(),
-                DOT => todo!(),
-                HASH => todo!(),
-                DOLLAR_SING => todo!(),
-                PIPE_RIGHT => todo!(),
-                PIPE_LEFT => todo!(),
-                L_ARROW => todo!(),
-                R_ARROW => todo!(),
-                FAT_ARROW => todo!(),
-                _expr_end => todo!(),
+        }
 
     }
 

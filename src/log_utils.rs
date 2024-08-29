@@ -2,7 +2,7 @@
 
 use std::process;
 
-use crate::lexer::Lexer;
+use crate::_lexer::Lexer;
 
 /// Prints an error message to the console and exits the program.
 ///

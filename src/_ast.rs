@@ -1,6 +1,6 @@
 
 #[derive(Debug, Clone)]
-pub enum Node {
+pub enum Expr {
     Empty,
     Newline,
 
@@ -119,6 +119,52 @@ pub enum Node {
         elifs: Vec<(Expr, Expr)>,
         else_body: Option<Box<Expr>>,
     },
+}
+
+
+
+
+/// Implementing PartialEq for Expr to allow for comparison of expressions.
+/// It only checks for type, not the content of the expressions. 
+/// Number(1) == Number(2) will return true.
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        use Expr::*;
+        match (self, other) {
+            (Empty, Empty) => true,
+            (Newline, Newline) => true,
+            (Number(_), Number(_)) => true,
+            (Identifier(_), Identifier(_)) => true,
+            (Str(_), Str(_)) => true,
+            (MemberAccess { .. }, MemberAccess { .. }) => true,
+            (Group(_), Group(_)) => true,
+            (BinOp { .. }, BinOp { .. }) => true,
+            (NamedArg(_, _), NamedArg(_, _)) => true,
+            (Array(_), Array(_)) => true,
+            (Sequence(_), Sequence(_)) => true,
+            (WrappedSequence(_), WrappedSequence(_)) => true,
+            (Block(_), Block(_)) => true,
+            (FunctionCall { .. }, FunctionCall { .. }) => true,
+            (Dict { .. }, Dict { .. }) => true,
+            (Alias(_), Alias(_)) => true,
+            (Range { .. }, Range { .. }) => true,
+            (Distribution { .. }, Distribution { .. }) => true,
+            (IterDistribution { .. }, IterDistribution { .. }) => true,
+            (Comment(_), Comment(_)) => true,
+            (Decorator { .. }, Decorator { .. }) => true,
+            (Lambda { .. }, Lambda { .. }) => true,
+            (Signal(_), Signal(_)) => true,
+            (Conditional { .. }, Conditional { .. }) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Empty, // Used to end parse_stmt
+
+    Expr(Expr),
 
     Python(String), // Python code
 
@@ -163,6 +209,8 @@ pub enum Node {
         body: Expr, // Expr::Block
     },
 
+    Import(Expr, Option<Expr>), // import <thing> [as <alias>]          last arguments the optional alias
+    From(Expr, Expr, Option<Expr>), // from <a> import <b> [as <alias>]
     ReactiveStmt{
         block: Vec<Node>,
         dependencies: Vec<String>,
@@ -176,50 +224,60 @@ pub enum Node {
     },
 }
 
-
-
-/// Implementing PartialEq for Expr to allow for comparison of expressions.
-/// It only checks for type, not the content of the expressions. 
-/// Number(1) == Number(2) will return true.
-impl PartialEq for Node {
+impl PartialEq for Stmt {
     fn eq(&self, other: &Self) -> bool {
-        use Node::*;
+        use Stmt::*;
         match (self, other) {
-            (Empty, Empty)
-            | (Newline, Newline)
-            | (Number(_), Number(_))
-            | (Identifier(_), Identifier(_))
-            | (Str(_), Str(_))
-            | (MemberAccess { .. }, MemberAccess { .. })
-            | (Group(_), Group(_))
-            | (BinOp { .. }, BinOp { .. })
-            | (NamedArg(_, _), NamedArg(_, _))
-            | (Array(_), Array(_))
-            | (Sequence(_), Sequence(_))
-            | (WrappedSequence(_), WrappedSequence(_))
-            | (Block(_), Block(_))
-            | (FunctionCall { .. }, FunctionCall { .. })
-            | (Dict { .. }, Dict { .. })
-            | (Alias(_), Alias(_))
-            | (Range { .. }, Range { .. })
-            | (Distribution { .. }, Distribution { .. })
-            | (IterDistribution { .. }, IterDistribution { .. })
-            | (Comment(_), Comment(_))
-            | (Decorator { .. }, Decorator { .. })
-            | (Lambda { .. }, Lambda { .. })
-            | (Signal(_), Signal(_))
-            | (Conditional { .. }, Conditional { .. })
-            | (Assign { .. }, Assign { .. })
-            | (FunctionDef { .. }, FunctionDef { .. })
-            | (Python(_), Python(_))
-            | (SignalDef { .. }, SignalDef { .. })
-            | (SignalUpdate { .. }, SignalUpdate { .. })
-            | (Deconstruction { .. }, Deconstruction { .. })
-            | (ReactiveStmt { .. }, ReactiveStmt { .. }) => true,
+            (Expr(_), Expr(_)) => true,
+            (Assign { .. }, Assign { .. }) => true,
+            (FunctionDef { .. }, FunctionDef { .. }) => true,
+            (Import(_, _), Import(_, _)) => true,
+            (From(_, _, _), From(_, _, _)) => true,
+            (Python(_), Python(_)) => true,
+            (SignalDef { .. }, SignalDef { .. }) => true,
+            (SignalUpdate { .. }, SignalUpdate { .. }) => true,
+            (Deconstruction { .. }, Deconstruction { .. }) => true,
+            (ReactiveStmt { .. }, ReactiveStmt { .. }) => true,
+            (Conditional { .. }, Conditional { .. }) => true,
             _ => false,
         }
     }
 }   
+
+#[derive(Debug, Clone)]
+pub enum Node {
+    Stmt(Stmt),
+    Expr(Expr),
+}
+/// Implementing PartialEq for Node to allow for comparison of nodes.
+/// It only checks for type at lower level, not the content of the expressions.
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Node::Stmt(a), Node::Stmt(b)) => a == b,
+            (Node::Expr(a), Node::Expr(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Into<Expr> for Node {
+    fn into(self) -> Expr {
+        match self {
+            Node::Expr(expr) => expr,
+            _ => Expr::Empty,
+        }
+    }
+}
+
+impl Into<Stmt> for Node {
+    fn into(self) -> Stmt {
+        match self {
+            Node::Stmt(stmt) => stmt,
+            _ => Stmt::Expr(Expr::Empty),
+        }
+    }
+}
 
 pub struct AST {
     // Vector of Scopes
@@ -242,8 +300,8 @@ impl AST {
     }
 
     /// Pop the current scope.
-    pub fn pop_scope(&mut self) -> Option<Vec<Node>> {
-        self.scope.pop()
+    pub fn pop_scope(&mut self) {
+        self.scope.pop();
     }
 
     /// Returns a reference to the current scope.
@@ -274,7 +332,7 @@ impl AST {
         for scope in &self.scope {
             for node in scope {
                 match node {
-                    (Node::SignalDef { name, dependencies, .. }) => {
+                    Node::Stmt(Stmt::SignalDef { name: n, dependencies, .. }) => {
                         if n == name {
                             deps = dependencies.clone();
                             break;

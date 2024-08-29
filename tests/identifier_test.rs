@@ -1,7 +1,7 @@
 /// Identifier test
 /// Ensures that lexer can correctly tokenize identifiers
 /// A valid identifier is a sequence of letters, digits, and underscores, starting with a letter or underscore
-use lang::lexer::{Lexer, TokenKind};
+use lang::_lexer::{Lexer, TokenKind};
 use rand::Rng;
 
 #[test]

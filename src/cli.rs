@@ -1,5 +1,5 @@
 use crate::{
-    log_utils::add_line_numbers, parser::Parser as LangParser, transpilers, use_transpiler,
+    log_utils::add_line_numbers, _parser::Parser as LangParser, transpilers, use_transpiler,
 };
 use std::path::PathBuf;
 

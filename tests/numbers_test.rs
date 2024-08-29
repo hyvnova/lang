@@ -1,6 +1,6 @@
 /// Test Numbers
 /// Ensuring that lexer can correctly tokenize numbers (integers and floats)
-use lang::lexer::{Lexer, TokenKind};
+use lang::_lexer::{Lexer, TokenKind};
 
 
 /// Generate 3 sets of N-digit random numbers
