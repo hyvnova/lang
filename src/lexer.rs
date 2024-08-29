@@ -5,13 +5,13 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
-pub enum TokenKind {
+/// Token Kind/Type
+pub enum Kind {
     // Special
     EOF,      // End of file
     NEW_LINE, // New line
 
     // Statement
-    _stmt_start, // index to start of statement tokens
     //   Instructions
     FN_DEF,    // fn
 
@@ -23,7 +23,6 @@ pub enum TokenKind {
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
-    _expr_start, // index to start of expression tokens
 
     // Condtionals are here because can be used as expressions
     IF,      // if
@@ -31,8 +30,6 @@ pub enum TokenKind {
     ELIF,     // elif
 
     ASSIGN,   // =, +=, -=, *=, /=, **=, %=
-
-    _stmt_end, // index to end of statement tokens
 
     // Expressions
     //   Parenthesis
@@ -48,13 +45,11 @@ pub enum TokenKind {
     R_SQUARE_BRACKET, // ]
 
     //   Values
-    _value_start, // index to start of value tokens
 
     IDENTIFIER,
     NUMBER,
     STRING,
 
-    _value_end, // index to end of value tokens
 
     //   Quotes
     SINGLE_QUOTE, // '
@@ -62,8 +57,6 @@ pub enum TokenKind {
     BACK_TICK,    // `
 
     //   Arithmetic
-    _op_start, // index to start of operator tokens
-
     ADD,
     SUBTRACT,
     DIVIDE,
@@ -71,6 +64,9 @@ pub enum TokenKind {
     MOD,
 
     // Logical
+    AND , // &&
+    OR,  // ||
+
     //   Comparison
     EQ, // ==
     NE, // !=
@@ -79,22 +75,15 @@ pub enum TokenKind {
     GT, // >
     GE, // >=
 
-    _bitwise_start, // index to start of bitwise operator tokens
-
     MULTIPLY, // <- placed here because can be used as *{expr} to dereference or unpack... so it's an unary operator
 
-
-    NEG, // !
-    AND, // &
-    PIPE,// | (bitwise or)
-    XOR, // ^
-    NOT, // ~
-
-    _bitwise_end, // index to end of bitwise operator tokens
+    NOT, // !
+    BIT_AND, // &
+    BIT_OR,// | (bitwise or)
+    BIT_XOR, // ^
+    BIT_NOT, // ~
 
     AT,   // @
-
-    _op_end, // index to end of operator tokens
 
     // Syntax
     SEMICOLON, // ;
@@ -119,22 +108,21 @@ pub enum TokenKind {
 
     FAT_ARROW, // => (used in lambda functions)
 
-    _expr_end, // index to end of expression tokens
 }
 
-const KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
-    "loop" => TokenKind::LOOP,
-    "continue" => TokenKind::CONTINUE,
-    "break" => TokenKind::BREAK,
-    "for" => TokenKind::FOR,
-    "while" => TokenKind::WHILE,
-    "if" => TokenKind::IF,
-    "else" => TokenKind::ELSE,
-    "elif" => TokenKind::ELIF,
-    "fn" => TokenKind::FN_DEF,
+const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
+    "loop" => Kind::LOOP,
+    "continue" => Kind::CONTINUE,
+    "break" => Kind::BREAK,
+    "for" => Kind::FOR,
+    "while" => Kind::WHILE,
+    "if" => Kind::IF,
+    "else" => Kind::ELSE,
+    "elif" => Kind::ELIF,
+    "fn" => Kind::FN_DEF,
 };
 
-impl PartialEq for TokenKind {
+impl PartialEq for Kind {
     fn eq(&self, other: &Self) -> bool {
         *self as i16 == *other as i16
     }
@@ -143,7 +131,7 @@ impl PartialEq for TokenKind {
 ///     Represents a single token contains it's associated value and metadata
 #[derive(Debug, Clone)]
 pub struct Token {
-    pub kind: TokenKind,
+    pub kind: Kind,
     pub value: String,
     pub line: usize,
     pub column: usize,
@@ -204,7 +192,7 @@ impl Lexer {
     pub fn next(&mut self) -> Option<Token> {
         let raw = self.next_raw_token();
 
-        if raw == TokenKind::EOF {
+        if raw == Kind::EOF {
             return None;
         }
 
@@ -216,11 +204,11 @@ impl Lexer {
         });
     }
 
-    fn next_raw_token(&mut self) -> TokenKind {
+    fn next_raw_token(&mut self) -> Kind {
         let ch: Option<char> = self.next_char();
 
         if ch.is_none() {
-            return TokenKind::EOF;
+            return Kind::EOF;
         }
 
         let ch = ch.unwrap();
@@ -232,7 +220,7 @@ impl Lexer {
                 self.line += 1;
                 self.column = 0;
                 self.current_token_value = Some("\n".to_string());
-                return TokenKind::NEW_LINE;
+                return Kind::NEW_LINE;
             }
 
             return self.next_raw_token();
@@ -243,7 +231,7 @@ impl Lexer {
             self.capturing_number = true;
             self.capture(ch, |char| char.is_numeric() || char == '.'); 
             self.capturing_number = false;
-            return TokenKind::NUMBER;
+            return Kind::NUMBER;
         }
 
         // * Identifier
@@ -254,7 +242,7 @@ impl Lexer {
             return KEYWORDS
                 .get(self.current_token_value.as_ref().unwrap().as_str())
                 .copied()
-                .unwrap_or(TokenKind::IDENTIFIER);
+                .unwrap_or(Kind::IDENTIFIER);
         }
 
         // * Special characters
@@ -265,44 +253,44 @@ impl Lexer {
             '+' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("+=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             '-' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("-=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             '*' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("*=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             '/' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("/=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             '*' if self.peek_next_char() == Some('*') && self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past *
                 self.current_token_value = Some("**=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             '%' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("%=".to_string());
-                return TokenKind::ASSIGN;
+                return Kind::ASSIGN;
             }
 
             // Comments -- value of comment is the comment itself
             '/' if self.peek_next_char() == Some('/') => {
                 self.next_char(); // Move past /
                 self.capture(' ', |char| char != '\n');
-                return TokenKind::COMMENT;
+                return Kind::COMMENT;
             }
 
             '/' if self.peek_next_char() == Some('*') => {
@@ -335,21 +323,21 @@ impl Lexer {
                         Some(_) => panic!("Unexpected character in multi line comment."),
                     }
                 }
-                return TokenKind::ML_COMMENT;
+                return Kind::ML_COMMENT;
             }
 
             // Big arrow
             '=' if self.peek_next_char() == Some('>') => {
                 self.current_char_index += 1; // Move past >
                 self.current_token_value = Some("=>".to_string());
-                return TokenKind::FAT_ARROW;
+                return Kind::FAT_ARROW;
             }
 
             // Arrows
             '<' if self.peek_next_char() == Some('-') => {
                 self.current_char_index += 1; // Move past -
                 self.current_token_value = Some("<-".to_string());
-                return TokenKind::L_ARROW;
+                return Kind::L_ARROW;
             }
 
             // * Pipes
@@ -357,107 +345,120 @@ impl Lexer {
             '|' if self.peek_next_char() == Some('>') => {
                 self.current_char_index += 1; // Move past >
                 self.current_token_value = Some("|>".to_string());
-                return TokenKind::PIPE_RIGHT;
+                return Kind::PIPE_RIGHT;
             }
 
             // Pipe left (<|)
             '<' if self.peek_next_char() == Some('|') => {
                 self.current_char_index += 1; // Move past |
                 self.current_token_value = Some("<|".to_string());
-                return TokenKind::PIPE_LEFT;
+                return Kind::PIPE_LEFT;
             }
-
-            // Pipe
-            '|' => return TokenKind::PIPE,
 
             '-' if self.peek_next_char() == Some('>') => {
                 self.current_char_index += 1; // Move past >
                 self.current_token_value = Some("->".to_string());
-                return TokenKind::R_ARROW;
+                return Kind::R_ARROW;
             }
+
+            // Logical
+            '&' if self.peek_next_char() == Some('&') => {
+                self.current_char_index += 1; // Move past &
+                self.current_token_value = Some("&&".to_string());
+                return Kind::AND;
+            }
+
+            '|' if self.peek_next_char() == Some('|') => {
+                self.current_char_index += 1; // Move past |
+                self.current_token_value = Some("||".to_string());
+                return Kind::OR;
+            }
+
+            // Pipe
+            '|' => return Kind::BIT_OR,
 
             // Comparison
             '=' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("==".to_string());
-                return TokenKind::EQ;
+                return Kind::EQ;
             }
 
             '<' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("<=".to_string());
-                return TokenKind::LE;
+                return Kind::LE;
             }
 
             '>' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some(">=".to_string());
-                return TokenKind::GE;
+                return Kind::GE;
             }
 
             '!' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("!=".to_string());
-                return TokenKind::NE;
+                return Kind::NE;
             }
 
-            '!' => return TokenKind::NEG,
-            '<' => return TokenKind::LT,
-            '>' => return TokenKind::GT,
+            '!' => return Kind::NOT,
+            '<' => return Kind::LT,
+            '>' => return Kind::GT,
 
             // Bitwise
-            '&' => return TokenKind::AND,
-            '^' => return TokenKind::XOR,
-            '~' => return TokenKind::NOT,
+            '&' => return Kind::BIT_AND,
+            '^' => return Kind::BIT_XOR,
+            '~' => return Kind::BIT_NOT,
 
             // Instruction
-            '=' => return TokenKind::ASSIGN,
+            '=' => return Kind::ASSIGN,
 
             // Parenthesis
-            '(' => return TokenKind::L_PARENT,
-            ')' => return TokenKind::R_PARENT,
+            '(' => return Kind::L_PARENT,
+            ')' => return Kind::R_PARENT,
 
             // Brackets
-            '{' => return TokenKind::L_BRACKET,
-            '}' => return TokenKind::R_BRACKET,
+            '{' => return Kind::L_BRACKET,
+            '}' => return Kind::R_BRACKET,
 
             // Square brackets
-            '[' => return TokenKind::L_SQUARE_BRACKET,
-            ']' => return TokenKind::R_SQUARE_BRACKET,
+            '[' => return Kind::L_SQUARE_BRACKET,
+            ']' => return Kind::R_SQUARE_BRACKET,
 
             // Arithmetic
-            '+' => return TokenKind::ADD,
-            '-' => return TokenKind::SUBTRACT,
+            '+' => return Kind::ADD,
+            '-' => return Kind::SUBTRACT,
             _ if ch == '*' && self.peek_next_char() == Some('*') => {
                 self.current_char_index += 1; // Move past *
                 self.column += 1;
                 self.current_token_value = Some("**".to_string());
-                return TokenKind::POW;
+                return Kind::POW;
             }
 
-            '*' => return TokenKind::MULTIPLY,
-            '/' => return TokenKind::DIVIDE,
-            '%' => return TokenKind::MOD,
+            '*' => return Kind::MULTIPLY,
+            '/' => return Kind::DIVIDE,
+            '%' => return Kind::MOD,
 
             // Syntax
-            ';' => return TokenKind::SEMICOLON,
-            ':' => return TokenKind::COLON,
-            ',' => return TokenKind::COMMA,
+            ';' => return Kind::SEMICOLON,
+            ':' => return Kind::COLON,
+            ',' => return Kind::COMMA,
                 
             '.' if self.peek_next_char() == Some('.') => {
                 self.current_char_index += 1; // Move past .
                 self.column += 1;
                 self.current_token_value = Some("..".to_string());
-                return TokenKind::D_DOT;
+                return Kind::D_DOT;
             }
             
-            '.' => return TokenKind::DOT,
+            '.' => return Kind::DOT,
             '#' => {
                 // ! Special keywords
                 self.capture(' ', |char| !&[' ', '\n'].contains(&char));
 
                 if self.current_token_value.is_none() {
-                    return TokenKind::HASH;
+                    return Kind::HASH;
                 }
 
                 match self.current_token_value.as_ref().unwrap().trim() {
@@ -499,7 +500,7 @@ impl Lexer {
                         self.column = 0;
 
                         self.current_token_value = Some(python_code);
-                        return TokenKind::PYTHON;
+                        return Kind::PYTHON;
                     }
 
                     _ => {
@@ -507,12 +508,12 @@ impl Lexer {
                         self.current_char_index -= self.current_token_value.as_ref().unwrap().len();
 
                         self.current_token_value = Some("#".to_string());
-                        return TokenKind::HASH;
+                        return Kind::HASH;
                     }
                 }
             }
-            '@' => return TokenKind::AT,
-            '$' => return TokenKind::DOLLAR_SING,
+            '@' => return Kind::AT,
+            '$' => return Kind::DOLLAR_SING,
 
             // Quotes -- Strings
             _ if ch == '"' || ch == '\'' => {
@@ -528,11 +529,11 @@ impl Lexer {
                 self.column += 1;
                 self.capturing_string = false;
 
-                return TokenKind::STRING;
+                return Kind::STRING;
             }
 
             // Reserved for syntax
-            '`' => return TokenKind::BACK_TICK,
+            '`' => return Kind::BACK_TICK,
 
             _ => error!(
                 self,
@@ -620,34 +621,5 @@ impl Lexer {
         }
 
         self.current_token_value = Some(value);
-    }
-
-    // ! Helper functions to determine what kind of token is being read
-
-    ///  Expression tokens are anything that can be part of an expression -- almost everything
-    pub fn is_expression_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_expr_start as i16; // End is not considered because it's causing trrouble
-    }
-
-    /// Value tokens are tokens that represent a value, such as a number or a string
-    pub fn is_value_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_value_start as i16
-            && (token.kind as i16) < TokenKind::_value_end as i16;
-    }
-
-    /// Operators tokens represent an operator, such as +, -, *, /, etc.
-    pub fn is_operator_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_op_start as i16
-            && (token.kind as i16) < TokenKind::_op_end as i16;
-    }
-
-    /// Statement token represent an instruction, such as `fn`, `assign`, etc.
-    pub fn is_statement_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_stmt_start as i16
-            && (token.kind as i16) < TokenKind::_stmt_end as i16;
-    }
-
-    pub fn is_bitwise_operator(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_bitwise_start as i16 && (token.kind as i16) < TokenKind::_bitwise_end as i16;
     }
 }

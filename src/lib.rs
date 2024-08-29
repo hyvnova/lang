@@ -2,13 +2,9 @@
 
 pub mod cli;
 
-pub mod _lexer;
-pub mod _parser;
-pub mod _ast;
-
+pub mod lexer;
 pub mod parser;
 pub mod ast;
-
 
 // pub mod analyzer;
 

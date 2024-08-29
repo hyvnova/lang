@@ -19,9 +19,9 @@ pub enum Node {
     Group(Box<Expr>),
 
     BinOp {
-        left: Box<Expr>,
+        lhs: Box<Expr>,
         op: String,
-        right: Box<Expr>,
+        rhs: Box<Expr>,
     },
     
     UnaryOp {
@@ -158,9 +158,9 @@ pub enum Node {
     /// Represents a function declaration.
     /// Ex. `def function(a, b) { return a + b }`
     FunctionDef {
-        name: Expr, // Expr::Identifier
-        args: Expr, // Expr::Sequence
-        body: Expr, // Expr::Block
+        name: String, 
+        args: Node,
+        body: Node
     },
 
     ReactiveStmt{
