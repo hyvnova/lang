@@ -23,9 +23,9 @@ pub enum TokenKind {
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
-    _expr_start, // index to start of expression tokens
+    _Node_start, // index to start of Nodeession tokens
 
-    // Condtionals are here because can be used as expressions
+    // Condtionals are here because can be used as Nodeessions
     IF,      // if
     ELSE,     // else
     ELIF,     // elif
@@ -34,7 +34,7 @@ pub enum TokenKind {
 
     _stmt_end, // index to end of statement tokens
 
-    // Expressions
+    // Nodeessions
     //   Parenthesis
     L_PARENT,
     R_PARENT,
@@ -81,7 +81,7 @@ pub enum TokenKind {
 
     _bitwise_start, // index to start of bitwise operator tokens
 
-    MULTIPLY, // <- placed here because can be used as *{expr} to dereference or unpack... so it's an unary operator
+    MULTIPLY, // <- placed here because can be used as *{Node} to dereference or unpack... so it's an unary operator
 
 
     NEG, // !
@@ -119,7 +119,7 @@ pub enum TokenKind {
 
     FAT_ARROW, // => (used in lambda functions)
 
-    _expr_end, // index to end of expression tokens
+    _Node_end, // index to end of Nodeession tokens
 }
 
 const KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
@@ -624,9 +624,9 @@ impl Lexer {
 
     // ! Helper functions to determine what kind of token is being read
 
-    ///  Expression tokens are anything that can be part of an expression -- almost everything
-    pub fn is_expression_token(token: &Token) -> bool {
-        return token.kind as i16 > TokenKind::_expr_start as i16; // End is not considered because it's causing trrouble
+    ///  Nodeession tokens are anything that can be part of an Nodeession -- almost everything
+    pub fn is_Nodeession_token(token: &Token) -> bool {
+        return token.kind as i16 > TokenKind::_Node_start as i16; // End is not considered because it's causing trrouble
     }
 
     /// Value tokens are tokens that represent a value, such as a number or a string

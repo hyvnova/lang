@@ -17,7 +17,7 @@ fn filter_repeated_strings(vec: Vec<String>) -> Vec<String> {
 }
 
 /// Box-It, bi!
-/// Used to box an expression
+/// Used to box an Nodeession
 macro_rules! bi {
     // Box it
     ($x:expr) => {
@@ -26,7 +26,8 @@ macro_rules! bi {
 }
 
 /// By default, the parser will stop at a semicolon or a new line.
-const EXPR_END: [Kind; 2] = [Kind::SEMICOLON, Kind::NEW_LINE];
+/// This is probably bad for performance, but I really can't care less
+const EXPR_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE];
 
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
@@ -47,13 +48,13 @@ pub struct Parser<'stop_arr> {
     // The token that stopped the parser will be pushed to the `stopped_at` vector.
     stops: Vec<&'stop_arr [Kind]>, 
 
-    // Makes parse, parse_expr, parse_statement, etc. stop at a token.
+    // Makes parse, parse_Node, parse_statement, etc. stop at a token.
     // used to globally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
     // In difference of `stops`, this is a single buffer of tokens, meaning that it will stop at the first token in the buffer.
     // This allows control over stops while letting handlers to push their own stops.
     global_stop : Option<Vec<Kind>>, 
 
-    capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
+    capturing_sequence: bool, // if the parser is capturing a sequence, parse_Node_from_buffer will return a sequence once parse_Node finds a Node end token
 
     // When a handler wants to capture signals, it will push a new vector to this variable.
     // The vector will be filled with the signals that the parser captures.
@@ -131,33 +132,31 @@ impl<'stop_arr> Parser<'stop_arr> {
         let scope = self.ast.pop_scope().unwrap_or_else(|| {
             error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
         });
-        dbg!(&scope); // TODO: loggin scope because currently we don't ahve a way to handle more than 1 Node in scope
+        dbg!(&scope.len()); // TODO: loggin scope because currently we don't ahve a way to handle more than 1 Node in scope
         scope
     }
 
 
-    /// Parses parenthesis
-    /// Should be called when it is expected to parse a parenthesis
-    /// Returns a WrappedSequence or a Group
-    /// (1, 2, 3) -> WrappedSequence
+    /// Parses parenthesis.
+    /// Should be called after encountering an opening parenthesis.
+    /// Returns a WrappedSequence or a Group \
+    /// (1, 2, 3) -> WrappedSequence.
     /// ( 1 + 2 ) -> Group
     fn parse_paren(&mut self) -> Node {
-        // Look for opening parenthesis
-        if self.next_token().map(|t| t.kind) != Some(Kind::L_PARENT) {
-            error!(&self.lexer, "Expected an opening parenthesis.");
-        }
-
         // Parse until closing parenthesis
-        let scope = self.parse_until(&[Kind::R_PARENT]);
+        let mut scope = self.parse_until(&[Kind::R_PARENT]);
 
         // Ensure closing parenthesis was found
         if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_PARENT {
             error!(&self.lexer, "Expected a closing parenthesis.");
         }
 
-        // If there's only one element, it's a group
-        if scope.len() == 1 {
-            return Node::Group(scope.pop().unwrap());
+        // If there's 1 or less elements in the scope, it's a group
+        if scope.len() < 2 {
+            return Node::Group(match scope.pop() {
+                Some(node) => Some(bi!(node)),
+                None => None
+            });
         }
         // Otherwise, it's a wrapped sequence
         return Node::WrappedSequence(scope);
@@ -168,23 +167,41 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// - `op`: the operator. Ex. `+`, `-`, `*`, `/`, `==`, `!=`, `>`, `<`, `>=`, `<=`
     /// Expects a left hand side and a right hand side
     /// Returns a BinOp node
-    fn parse_binop(&mut self, current_stop: &[Kind], op: String) {
+    fn parse_binop(&mut self, current_stop: &'stop_arr [Kind], op: String) {
         // LHS should be the last node in the scope
         let lhs = self.ast.pop_node().unwrap_or_else(|| {
-            error!(&self.lexer, "Expected an expression before binary operator.")
+            error!(&self.lexer, "Expected an Nodeession before binary operator.")
         });
 
         // Parse RHS
         let rhs = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
-            error!(&self.lexer, "Expected an expression after binary operator.")
+            error!(&self.lexer, "Expected an Nodeession after binary operator.")
         });
 
         self.ast.add_node(Node::BinOp { lhs: bi!(lhs), op, rhs: bi!(rhs) });
     }
 
+
+    /// Parses a block.
+    /// Should be called after encountering an opening bracket.
+    /// Ensures that the block is closed.
+    /// Returns a Block node.
+    fn parse_block(&mut self) -> Node {
+        // Parse until closing bracket
+        let scope = self.parse_until(&[Kind::R_BRACKET]);
+
+        // Ensure closing bracket was found
+        if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_BRACKET {
+            error!(&self.lexer, "Expected a closing bracket.");
+        }
+
+        Node::Block(scope)
+    }
+
     pub fn parse(&mut self) {
         // * Parse start
         while let Some(token) = self.next_token() {
+
             // * Global stop at
             if let Some(stop_at) = &self.global_stop {
                 if stop_at.contains(&token.kind) {
@@ -194,8 +211,11 @@ impl<'stop_arr> Parser<'stop_arr> {
             }
 
             // Used to make all handlers stop where they're supposed to
-            // In other words, if I handler sets a stop this will make sure that the parser stops at that token
-            let current_stop: &[Kind] = self.stops.pop().unwrap_or(&EXPR_END);
+            // In other words, if a handler sets a stop this will make sure that the parser stops at that token
+            let current_stop: &[Kind] = match self.stops.last() {
+                Some(stop) => *stop,
+                None => EXPR_END,
+            };
 
             // * Stop at
             if current_stop.contains(&token.kind) {
@@ -239,14 +259,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     // Parse function arguments
-                    let args_scope: Vec<Node> = self.parse_until(&[R_PARENT]);
-
-                    // Args must a WrappedSequence or a Group
-                    let args: Vec<Node> = match args_scope {
-                        Node::WrappedSequence(args) 
-                        | Node::Group(args) => args,
-                        other => error!(&self.lexer, format!("Expected a sequence of arguments for function. Got: {:?}", other)),
-                    };
+                    let args = bi!(self.parse_paren()); 
 
                     // Ensure parenthesis was closed
                     if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_PARENT {
@@ -254,20 +267,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     // Ensure there's a block after the arguments
-                    if !self.peek_token().map(|t| t.kind == Kind::L_BRACKET).unwrap_or(false) {
+                    if !self.next_token().map(|t| t.kind == Kind::L_BRACKET).unwrap_or(false) {
                         error!(&self.lexer, "Expected a block after function arguments.");
                     }
 
-                    self.next_token(); // Consume the L_BRACKET
-
                     // Parse function body
-                    let body_scope: Vec<Node> = self.parse_until(&[R_BRACKET]);
-                    let body = Node::Block(body_scope);
-
-                    // Ensure block was closed
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_BRACKET {
-                        error!(&self.lexer, "Expected a closing bracket to close function body.");
-                    }
+                    let body = bi!(self.parse_block());
 
                     // Add function to AST
                     self.ast.add_node(Node::FunctionDef { name, args, body });
@@ -284,12 +289,22 @@ impl<'stop_arr> Parser<'stop_arr> {
                 IF => todo!(),
                 ELSE => todo!(),
                 ELIF => todo!(),
+
                 ASSIGN => todo!(),
                 
-                L_PARENT => todo!(),
-                R_PARENT => todo!(),
+                // * Parenthesis
+                L_PARENT => {
+                    let expr = self.parse_paren();
+                    self.ast.add_node(expr);
+                }
+                R_PARENT => error!(&self.lexer, "Unexpected closing parenthesis."),
+
+
+                // * Brackets / Blocks / Dictionaries
                 L_BRACKET => todo!(),
                 R_BRACKET => todo!(),
+                
+                // * Indexing / Arrays
                 L_SQUARE_BRACKET => todo!(),
                 R_SQUARE_BRACKET => todo!(),
 
@@ -302,7 +317,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 BACK_TICK => todo!(),
 
                 // * Unary Operators / Bitwise
-                // {op}{expr}
+                // {op}{Node}
                 NOT // "!" not
                 | MULTIPLY // "*" unpack
                 | BIT_AND
@@ -317,7 +332,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     let expr = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected an expression after unary operator.")
+                        error!(&self.lexer, "Expected an Nodeession after unary operator.")
                     });
 
                     self.ast.add_node(Node::UnaryOp { op: token.value.clone(), expr: bi!(expr) });

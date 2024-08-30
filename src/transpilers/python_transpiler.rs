@@ -1,7 +1,7 @@
 /// Transpile to Python
-/// This mode implements the Transpile trait for the AST Node, Stmt and Expr
+/// This mode implements the Transpile trait for the AST Node, Stmt and Node
 /// It converts the AST to a string representation of the code in Python
-use crate::_ast::{Expr, Node, Stmt, AST};
+use crate::ast::{Node, AST};
 use std::fs;
 use std::path::Path;
 
@@ -50,9 +50,9 @@ pub fn transpile(ast: &AST) -> String {
     code
 }
 
-impl Transpile for Expr {
+impl Transpile for Node {
     fn transpile(&self) -> String {
-        use Expr::*;
+        use Node::*;
         match self {
             Empty => "".to_string(),
             Newline => "\n".to_string(),
@@ -64,7 +64,7 @@ impl Transpile for Expr {
                 } else {
                     format!("# {}\n", comment)
                 } 
-            }
+            },
 
 
             Number(n) => n.to_string(),
@@ -73,13 +73,16 @@ impl Transpile for Expr {
 
             MemberAccess { object, member } => {
                 format!("{}.{}", object.transpile(), member.transpile())
-            }
+            },
 
-            Group(expr) => format!("({})", expr.transpile()),
+            Group(expr) => format!("({})", match expr {
+                Some(e) => e.transpile(),
+                None => "".to_string()
+            }),
 
-            BinOp { left, op, right } => {
-                format!("{} {} {}", left.transpile(), op, right.transpile())
-            }
+            BinOp { lhs, op, rhs } => {
+                format!("{} {} {}", lhs.transpile(), op, rhs.transpile())
+            },
 
             UnaryOp { op, expr } => format!("{}{}", op, expr.transpile()),
 
@@ -87,12 +90,12 @@ impl Transpile for Expr {
 
             Array(values) => {
                 format!("[{}]", values.transpile())
-            }
+            },
 
             Index { object, index } => {
                 format!("{}[{}]", object
                     .transpile(), index.transpile())
-            }
+            },
 
             Sequence(values) => {
                 let mut code = String::new();
@@ -103,7 +106,7 @@ impl Transpile for Expr {
                     }
                 }
                 code
-            }
+            },
 
             WrappedSequence(values) => {
                 let mut code = String::from("(");
@@ -115,7 +118,7 @@ impl Transpile for Expr {
                 }
                 code.push_str(")");
                 code
-            }
+            },
 
             // TODO: Don't know how to implement this yet
             Block(nodes) => {
@@ -134,7 +137,7 @@ impl Transpile for Expr {
                 // code.push_str(format!("\n\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
 
                 code
-            }
+            },
 
             FunctionCall { name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
@@ -150,7 +153,7 @@ impl Transpile for Expr {
                 }
                 code.push_str("}");
                 code
-            }
+            },
 
             Alias(name) => format!("as {}", name.transpile()),
 
@@ -165,7 +168,7 @@ impl Transpile for Expr {
                     end.transpile(),
                     if *inclusive { "+1" } else { "" }
                 )
-            }
+            },
 
             // * Distribution
             // Distribution pipes args into functions
@@ -184,7 +187,7 @@ impl Transpile for Expr {
                 }
 
                 code
-            }
+            },
 
             // * Iterative Distribution
             // Iterative Distribution pipes iteration of args into functions
@@ -215,18 +218,18 @@ impl Transpile for Expr {
                 }
 
                 code
-            }
+            },
 
 
             Decorator { name, args } => {
                 format!("@{}{}", name.transpile(), if args.is_some() { args.clone().unwrap().transpile() } else { "".to_string() })
-            }
+            },
 
             Lambda { args, body } => {
                 let args_str = args.transpile();
 
                 format!("lambda {}: {}", args_str[1..args_str.len()-1].to_string(), body.transpile())
-            }
+            },
             
             Signal(name) => format!("{}.value", name),
 
@@ -252,136 +255,15 @@ impl Transpile for Expr {
                 }
 
                 code
-            }
-        }
-    }
-}
+            },
 
-impl Transpile for Stmt {
-    fn transpile(&self) -> String {
-        use Stmt::*;
-        match self {
-            Empty => "".to_string(),
-
-            Expr(expr) => expr.transpile(),
-
-            Python(code) => code.to_string(),
-
-            Assign {
-                identifiers,
-                values,
-                op
-            } => {
-                let mut code = String::new();
-
-                for (i, ident) in identifiers.iter().enumerate() {
-                    code.push_str(&ident.transpile());
-                    code.push_str(&format!(" {op} ",));
-                    code.push_str(&values[i].transpile());
-                    code.push_str("\n");
-                }
-
-                code
-            }
-
-            Deconstruction { identifiers, value } => {
-                let mut code = String::new();
-
-                let val_str = value.transpile();
-
-                for ident in identifiers.iter() {
-
-                    // {ident} = {dict}["{ident}"]
-                    code.push_str(format!("{0} = {1}[\"{0}\"];\n", ident.transpile(), val_str).as_str());
-                }
-
-                code
-            }
-
-            FunctionDef { name, args, body } => {
-                let mut code = String::new();
-                code.push_str(format!("def {}{}:{}", name.transpile(), args.transpile(), body.transpile()).as_str());
-                code
-            }
-
-            Import(name, alias) => format!(
-                "import {}{}\n",
-                name.transpile(),
-                match alias {
-                    Some(alias) => format!(" as {}", alias.transpile()),
-                    None => "".to_string(),
-                }
-            ),
-            From(name, thing, alias) => format!(
-                "from {} import {}{}\n",
-                name.transpile(),
-                thing.transpile(),
-                match alias {
-                    Some(alias) => format!(" as {}", alias.transpile()),
-                    None => "".to_string(),
-                }
-            ),
-            
-            SignalDef { name, value , dependencies} => {
-                format!("{0} = Signal(lambda {0}: {1}{2}) \n", 
-                    name, 
-                    value.transpile(), 
-                    if dependencies.is_empty() {
-                        "".to_string()
-                    } else {
-                        format!(", {}", dependencies.join(", "))
-                    } 
-                )
-            }
-
-            SignalUpdate { name, value, dependencies } => {
-                format!("{0}.update(lambda {0}: {1}{2})", 
-                    name, 
-                    value.transpile(), 
-                    if dependencies.is_empty() {
-                        "".to_string()
-                    } else {
-                        format!(", {}", dependencies.join(", "))
-                    } 
-                )
-            }
-
-            ReactiveStmt { block, dependencies } => {
-                let mut code = String::from("def _lang_reactive_stmt():");
-                for node in block.iter() {
-                    code.push_str(format!("\n\t{0}", node.transpile()).as_str());
-                }
-
-                code.push_str(format!("\nReactiveStmt(_lang_reactive_stmt, {})", dependencies.join(", ")).as_str());
-                code
-            }
-
-            Conditional { condition, body, elifs, else_body } => {
-                let mut code = String::new();
-
-                // if
-                code.push_str(format!("if {}:{}\n", condition.transpile(), body.transpile()).as_str());
-                // elifs
-                for (cond, body) in elifs.iter() {
-                    code.push_str(format!("elif {}:{}\n", cond.transpile(), body.transpile()).as_str());
-                }
-
-                // else
-                if let Some(else_body) = else_body {
-                    code.push_str(format!("else:{}\n", else_body.transpile()).as_str());
-                }
-
-                code
-            }
-        }
-    }
-}
-
-impl Transpile for Node {
-    fn transpile(&self) -> String {
-        match self {
-            Node::Stmt(stmt) => stmt.transpile(),
-            Node::Expr(expr) => expr.transpile(),
+            Python(_) => todo!(),
+            Assign { identifiers, values, op } => todo!(),
+            SignalDef { name, value, dependencies } => todo!(),
+            SignalUpdate { name, value, dependencies } => todo!(),
+            Deconstruction { identifiers, value } => todo!(),
+            FunctionDef { name, args, body } => todo!(),
+            ReactiveStmt { block, dependencies } => todo!(),
         }
     }
 }

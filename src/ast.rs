@@ -11,84 +11,85 @@ pub enum Node {
     /// Represents a member access in an object through the dot operator.
     /// Example: `object.member`
     MemberAccess { 
-        object: Box<Expr>,
-        member: Box<Expr>,
+        object: Box<Node>,
+        member: Box<Node>,
     },
 
-    /// Captures expressions inside parenthesis. Ex. ( expr )
-    Group(Box<Expr>),
+    /// Captures Nodeessions inside parenthesis. Ex. ( Node )
+    /// Can be empty. Ex. ()
+    Group(Option<Box<Node>>),
 
     BinOp {
-        lhs: Box<Expr>,
+        lhs: Box<Node>,
         op: String,
-        rhs: Box<Expr>,
+        rhs: Box<Node>,
     },
     
     UnaryOp {
         op: String,
-        expr: Box<Expr>,
+        expr: Box<Node>,
     },
 
     /// Represents a function call. Ex. `function(name = value)``
-    NamedArg(String, Box<Expr>),
+    NamedArg(String, Box<Node>),
 
     /// An array . Ex. `[1, 2, 3]` 
-    Array(Box<Expr>),
+    Array(Box<Node>),
 
 
     /// Indexing. Ex. `array[0]` or `object[key]` or `object[1..3]`
     Index {
-        object: Box<Expr>,
-        index: Box<Expr>,
+        object: Box<Node>,
+        index: Box<Node>,
     },
 
-    ///  A sequence of expressions. Serves as a way to group expressions without parenthesis. Sort of like a tuple.
-    /// {expr}, {expr}, ...
-    Sequence(Vec<Expr>),
+    ///  A sequence of Nodeessions. Serves as a way to group Nodeessions without parenthesis. Sort of like a tuple.
+    /// {Node}, {Node}, ...
+    Sequence(Vec<Node>),
 
     /// WrappedSequence
     /// A sequence wrapped by parenthesis. Ex. `(1, 2, 3)`
-    WrappedSequence(Vec<Expr>),
+    WrappedSequence(Vec<Node>),
 
     /// Block of code
     Block(Vec<Node>),
 
     /// Represents a function call. Ex. `function(1, 2, 3)`
     FunctionCall {
-        name: Box<Expr>,
-        args: Box<Expr> // Group or Sequence
+        name: Box<Node>,
+        args: Box<Node> // Group or Sequence
     },
 
     /// Dict { key: value, key: value, ... }
     /// { variable,  ... }
     Dict {
-        keys: Vec<Expr>,
-        values: Vec<Expr>,
+        keys: Vec<Node>,
+        values: Vec<Node>,
     },
 
     /// Alias for something
-    /// as {expr}
-    Alias(Box<Expr>),
+    /// as {Node}
+    Alias(Box<Node>),
     
     /// Range 
     Range {
-        start: Box<Expr>,
-        end: Box<Expr>,
+        start: Box<Node>,
+        end: Box<Node>,
         inclusive: bool,
     },
 
     /// Distribution
     /// | {sequence} -> {recipients};
     Distribution {
-        args: Vec<Expr>, 
-        recipients: Vec<Expr>,
+        args: Vec<Node>, 
+        recipients: Vec<Node>,
     },
 
     /// Iterative Distribution
     /// |> {sequence} -> {recipients};
     IterDistribution {
-        args: Vec<Expr>,
-        recipients: Vec<Expr>,
+        args: Vec<Node>,
+        recipients: Vec<Node>,
     },
 
     Comment(String),
@@ -96,13 +97,13 @@ pub enum Node {
     /// Decorator
     /// @{name}({args})
     Decorator {
-        name: Box<Expr>,
-        args: Option<Box<Expr>>,
+        name: Box<Node>,
+        args: Option<Box<Node>>,
     },
 
     /// Anon function
     Lambda {
-        args: Box<Expr>,
+        args: Box<Node>,
         body: Box<Node>,
     },
     
@@ -114,10 +115,10 @@ pub enum Node {
     /// Condtional
     /// if {condition} {body} [elif {condition} {body}]* [else {body}]
     Conditional {
-        condition: Box<Expr>,
-        body: Box<Expr>,
-        elifs: Vec<(Expr, Expr)>,
-        else_body: Option<Box<Expr>>,
+        condition: Box<Node>,
+        body: Box<Node>,
+        elifs: Vec<(Node, Node)>, // (condition, body)
+        else_body: Option<Box<Node>>,
     },
 
     Python(String), // Python code
@@ -126,8 +127,8 @@ pub enum Node {
     /// The identifier can be a single identifier or a sequence of identifiers.
     /// Ex. `a = 1`, `a, b = 1, 2`
     Assign {
-        identifiers: Vec<Expr>,
-        values: Vec<Expr>,
+        identifiers: Vec<Node>,
+        values: Vec<Node>,
         op: String, // =, +=, -=, *=, /=
     },
     
@@ -135,7 +136,7 @@ pub enum Node {
     /// $ {name} = {value}
     SignalDef {
         name: String,
-        value: Expr,
+        value: Box<Node>,
         dependencies: Vec<String>,
     },
 
@@ -144,42 +145,35 @@ pub enum Node {
     /// In different from SignalDef, this is used to update the value of a signal, maintaining it's listeners.
     SignalUpdate {
         name: String,
-        value: Expr,
+        value: Box<Node>,
         dependencies: Vec<String>,
     },
 
     /// Deconstruction
-    /// {a, b} = {expr} -> a = expr.a and b = expr.b
+    /// {a, b} = {Node} -> a = Node.a and b = Node.b
     Deconstruction {
-        identifiers: Vec<Expr>,
-        value: Expr,
+        identifiers: Vec<Node>,
+        value: Box<Node>,
     },
 
     /// Represents a function declaration.
     /// Ex. `def function(a, b) { return a + b }`
     FunctionDef {
         name: String, 
-        args: Node,
-        body: Node
+        args: Box<Node>,
+        body: Box<Node>
     },
 
     ReactiveStmt{
         block: Vec<Node>,
         dependencies: Vec<String>,
     },
-
-    Conditional {
-        condition: Box<Expr>,
-        body: Box<Expr>,
-        elifs: Vec<(Expr, Expr)>,
-        else_body: Option<Box<Expr>>,
-    },
 }
 
 
 
-/// Implementing PartialEq for Expr to allow for comparison of expressions.
-/// It only checks for type, not the content of the expressions. 
+/// Implementing PartialEq for Node to allow for comparison of Nodeessions.
+/// It only checks for type, not the content of the Nodeessions. 
 /// Number(1) == Number(2) will return true.
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
@@ -269,13 +263,13 @@ impl AST {
 
     /// Finds a Signal's dependencies given it's name
     /// This asumes that the signal exists..
-    pub fn find_signal_deps(&self, name: &str) -> Vec<String> {
+    pub fn find_signal_deps(&self, target: &str) -> Vec<String> {
         let mut deps = Vec::new();
         for scope in &self.scope {
             for node in scope {
                 match node {
-                    (Node::SignalDef { name, dependencies, .. }) => {
-                        if n == name {
+                    Node::SignalDef {name, dependencies, .. } => {
+                        if target == name {
                             deps = dependencies.clone();
                             break;
                         }

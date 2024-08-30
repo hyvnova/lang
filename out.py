@@ -8,6 +8,4 @@ from signals import *
 from typecasting import * 
 # End of custom builtins
 
-if 1:
-	print("a")
-
+((1) - 1 * (2 + 1))

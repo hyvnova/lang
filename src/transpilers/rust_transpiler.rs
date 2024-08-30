@@ -2,9 +2,9 @@
 
 
 /// Transpile to Rust
-/// This mode implements the Transpile trait for the AST Node, Stmt and Expr
+/// This mode implements the Transpile trait for the AST Node, Stmt and Node
 /// It converts the AST to a string representation of the code in Rust
-use crate::ast::{Expr, Node, Stmt, AST};
+use crate::ast::{Node, Node, Stmt, AST};
 
 use core::panic;
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ trait Transpile {
 }
 
 /// Composition of the program, where each key is a function or scope
-/// and the valie is a vector of strings that representseach statement/expr in the function/scope
+/// and the valie is a vector of strings that representseach statement/Node in the function/scope
 struct Composition {
     composition: HashMap<String, Vec<String>>,
     position: String,
@@ -63,21 +63,21 @@ impl Transpile for Node {
     fn transpile(&self) -> String {
         match self {
             Node::Stmt(stmt) => stmt.transpile(),
-            Node::Expr(expr) => expr.transpile(),
+            Node::Node(Node) => Node.transpile(),
         }
     }
 
     fn complex_transpile(&self, composition: &mut Composition, ident_level: usize) -> String {
         match self {
             Node::Stmt(stmt) => stmt.complex_transpile(composition, ident_level),
-            Node::Expr(expr) => expr.complex_transpile(composition, ident_level),
+            Node::Node(Node) => Node.complex_transpile(composition, ident_level),
         }
     }
 }
 
-impl Transpile for Expr {
+impl Transpile for Node {
     fn transpile(&self) -> String {
-        use Expr::*;
+        use Node::*;
         
         match self {
             Empty => String::new(),
@@ -97,7 +97,7 @@ impl Transpile for Expr {
                 right.transpile()
             ),
 
-            // as {expr} 
+            // as {Node} 
             Alias(name) => format!("as {};", name.transpile()),
 
             Array(values) => {
@@ -117,7 +117,7 @@ impl Transpile for Expr {
             // Currently not parsed
             Block(nodes) => { String::from("\"A block\"") },
 
-            // as {expr}
+            // as {Node}
             Dict { keys, values } => { String::from("\"A dict\"") },
             
             Newline => String::from("\n"),
@@ -129,12 +129,12 @@ impl Transpile for Expr {
                 )
             },
 
-            Group(expr) => {
-                format!("({})", expr.transpile())
+            Group(Node) => {
+                format!("({})", Node.transpile())
             },
 
-            UnaryOp { op, expr } => {
-                format!("{}{}", op, expr.transpile())
+            UnaryOp { op, Node } => {
+                format!("{}{}", op, Node.transpile())
             },
 
             NamedArg(name, value) => panic!("NamedArg doens't exist in Rust"),

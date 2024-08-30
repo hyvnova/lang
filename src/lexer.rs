@@ -24,14 +24,14 @@ pub enum Kind {
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
 
-    // Condtionals are here because can be used as expressions
+    // Condtionals are here because can be used as Nodeessions
     IF,      // if
     ELSE,     // else
     ELIF,     // elif
 
     ASSIGN,   // =, +=, -=, *=, /=, **=, %=
 
-    // Expressions
+    // Nodeessions
     //   Parenthesis
     L_PARENT,
     R_PARENT,
@@ -75,7 +75,7 @@ pub enum Kind {
     GT, // >
     GE, // >=
 
-    MULTIPLY, // <- placed here because can be used as *{expr} to dereference or unpack... so it's an unary operator
+    MULTIPLY, // <- placed here because can be used as *{Node} to dereference or unpack... so it's an unary operator
 
     NOT, // !
     BIT_AND, // &

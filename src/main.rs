@@ -1,5 +1,5 @@
 use lang::log_utils::add_line_numbers;
-use lang::_parser::Parser;
+use lang::parser::Parser;
 use lang::transpilers::python_transpiler::transpile;
 use std::path::PathBuf;
 use std::process::Command;

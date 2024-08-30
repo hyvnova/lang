@@ -3,7 +3,7 @@
 pub mod python_transpiler;
 // pub mod rust_transpiler; 
 
-/// Should be implement in Node, Stmt and Expr
+/// Should be implement in Node, Stmt and Node
 /// Used to convert the AST to a string representation of the code in the desired language 
 
 #[macro_export]

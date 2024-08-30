@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    _ast::{Expr, Node, Stmt, AST},
+    _ast::{Node, Node, Stmt, AST},
     error,
     _lexer::{Lexer, Token, TokenKind},
     log,
@@ -17,10 +17,10 @@ fn filter_repeated_strings(vec: Vec<String>) -> Vec<String> {
 }
 
 /// Box-It, bit!
-/// Used to box an expression
+/// Used to box an Nodeession
 macro_rules! bit {
     // Box it
-    ($x:expr) => {
+    ($x:Node) => {
         Box::new($x)
     };
 }
@@ -34,7 +34,7 @@ macro_rules! tkarr {
 }
 
 macro_rules! add_stop {
-    ($self:expr, $($token:ident),*) => {
+    ($self:Node, $($token:ident),*) => {
         $self.stops.push(tkarr![$($token),*]);
     };
 }
@@ -58,13 +58,13 @@ pub struct Parser {
     // The token that stopped the parser will be pushed to the `stopped_at` vector.
     stops: Vec<Vec<TokenKind>>, 
 
-    // Makes parse, parse_expr, parse_statement, etc. stop at a token.
+    // Makes parse, parse_Node, parse_statement, etc. stop at a token.
     // used to globally control the parser flow. Ex. parse_block needs to stop at R_BRACKET
     // In difference of `stops`, this is a single buffer of tokens, meaning that it will stop at the first token in the buffer.
     // This allows control over stops while letting handlers to push their own stops.
     global_stop : Option<Vec<TokenKind>>, 
 
-    capturing_sequence: bool, // if the parser is capturing a sequence, parse_expr_from_buffer will return a sequence once parse_expr finds a expr end token
+    capturing_sequence: bool, // if the parser is capturing a sequence, parse_Node_from_buffer will return a sequence once parse_Node finds a Node end token
 
     // When a handler wants to capture signals, it will push a new vector to this variable.
     // The vector will be filled with the signals that the parser captures.
@@ -167,12 +167,12 @@ impl Parser {
             if Lexer::is_statement_token(&token) {
                 let statement: Stmt = self.parse_statement();
                 self.ast.add_node(Node::Stmt(statement));
-            } else if Lexer::is_expression_token(&token) {
-                let expr: Expr = self.parse_expr();
+            } else if Lexer::is_Nodeession_token(&token) {
+                let Node: Node = self.parse_Node();
 
-                log!("+ parse", "Adding expression to AST: {:?}", expr);
+                log!("+ parse", "Adding Nodeession to AST: {:?}", Node);
 
-                self.ast.add_node(Node::Expr(expr));
+                self.ast.add_node(Node::Node(Node));
             } else {
                 log!("! parse", "Unknown token: {:?}", token);
             }
@@ -211,11 +211,11 @@ impl Parser {
 
             match token.kind {
                 // * Conditional
-                // `if {expr} {block} [elif {expr} {block} ...] [else {block}]`
+                // `if {Node} {block} [elif {Node} {block} ...] [else {block}]`
                 TokenKind::IF => {
-                    let expr = self.parse_conditional();
-                    match expr {
-                        Expr::Conditional { condition, body, elifs, else_body } => {
+                    let Node = self.parse_conditional();
+                    match Node {
+                        Node::Conditional { condition, body, elifs, else_body } => {
                             return Stmt::Conditional {
                                 condition,
                                 body,
@@ -223,7 +223,7 @@ impl Parser {
                                 else_body,
                             };
                         }
-                        _ => error!(&self.lexer, "Expected a conditional expression."),
+                        _ => error!(&self.lexer, "Expected a conditional Nodeession."),
                     }
                 }
 
@@ -232,9 +232,9 @@ impl Parser {
                 }
 
                 // * Assingment & Deconstruction & Arithmetic assingments
-                // {ident} = {expr};
-                // {ident} += {expr};
-                // { {ident}, {ident} } = {expr};
+                // {ident} = {Node};
+                // {ident} += {Node};
+                // { {ident}, {ident} } = {Node};
                 TokenKind::ASSIGN => {
                     self.put_back(token);
                     let stmt = self.parse_assingment();
@@ -246,7 +246,7 @@ impl Parser {
                 TokenKind::FN_DEF => {
                     // Parse function name
                     add_stop!(self, L_PARENT);
-                    let name = self.get_expr(&Expr::Identifier(String::new()));
+                    let name = self.get_Node(&Node::Identifier(String::new()));
 
                     // Since should stop at L_PARENT, if it's not there, raise an error
                     if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != TokenKind::L_PARENT {
@@ -285,11 +285,11 @@ impl Parser {
                     return Stmt::FunctionDef { name, args, body };
                 }
 
-                // * Parsing exprs inside statment
-                _ if Lexer::is_expression_token(&token) => {
+                // * Parsing Nodes inside statment
+                _ if Lexer::is_Nodeession_token(&token) => {
                     self.put_back(token);
-                    let expr = self.parse_expr();
-                    self.ast.add_node(Node::Expr(expr));
+                    let Node = self.parse_Node();
+                    self.ast.add_node(Node::Node(Node));
 
                     continue;
                 }
@@ -301,22 +301,22 @@ impl Parser {
         unimplemented!("Statement parsing didn't reach a return statement at implementations.");
     }
 
-    /// Called when encountering an expression token.
-    /// Expression token should be set as REMAINDER_TOKEN before calling this function.
-    /// Captures the expression from token to the next semicolon or new line.
+    /// Called when encountering an Nodeession token.
+    /// Nodeession token should be set as REMAINDER_TOKEN before calling this function.
+    /// Captures the Nodeession from token to the next semicolon or new line.
     ///
     /// ### Arguments
-    /// `stop_at` is a tuple of token types that should stop the expression parsing.
-    fn parse_expr(&mut self) -> Expr {
-        let mut buffer: Vec<Expr> = Vec::new();
+    /// `stop_at` is a tuple of token types that should stop the Nodeession parsing.
+    fn parse_Node(&mut self) -> Node {
+        let mut buffer: Vec<Node> = Vec::new();
 
         let default_stop: Vec<TokenKind> = tkarr![NEW_LINE, SEMICOLON];
         let stop_at: Vec<TokenKind> = self.stops.last().cloned().unwrap_or(default_stop.clone());
 
-        // * Capture all tokens that make up the expression
+        // * Capture all tokens that make up the Nodeession
         while let Some(token) = self.next_token() {
             log!(
-                "parse expr",
+                "parse Node",
                 "{:?} stop_at={:?} buffer={:?} stopped_at={:?}",
                 token,
                 stop_at,
@@ -330,7 +330,7 @@ impl Parser {
                     log!("! global stop");
                     // We put back token and end here so parse() can handle the stop
                     self.put_back(token);
-                    return self.parse_expr_from_buffer(buffer);
+                    return self.parse_Node_from_buffer(buffer);
                 } 
             }
 
@@ -340,26 +340,26 @@ impl Parser {
                     self.stops.pop(); // Remove the stop buffer
                     self.stopped_at.push(token.kind);
                 }
-                return self.parse_expr_from_buffer(buffer);
+                return self.parse_Node_from_buffer(buffer);
             }
 
-            // If it's not an expression token
-            if !Lexer::is_expression_token(&token) {
-                self.put_back(token); // Put back the token that stopped the expression
+            // If it's not an Nodeession token
+            if !Lexer::is_Nodeession_token(&token) {
+                self.put_back(token); // Put back the token that stopped the Nodeession
                 break;
             }
 
             match token.kind {
                 // * Comments
                 TokenKind::COMMENT | TokenKind::ML_COMMENT => {
-                    self.ast.add_node(Node::Expr(Expr::Comment(token.value.clone())));
+                    self.ast.add_node(Node::Node(Node::Comment(token.value.clone())));
                     continue;
                 }
 
                 // * Conditional
                 TokenKind::IF => {
-                    let expr = self.parse_conditional();
-                    buffer.push(expr);
+                    let Node = self.parse_conditional();
+                    buffer.push(Node);
                     continue;
                 }
 
@@ -378,7 +378,7 @@ impl Parser {
                         self.capturing_signals.push(Vec::new()); // Start capturing signals
 
                         let block = match self.parse_block() {
-                            Expr::Block(block) => block,
+                            Node::Block(block) => block,
                             _ => error!(&self.lexer, "Expected a block when declaring a reactive statement"),
                         };
 
@@ -408,7 +408,7 @@ impl Parser {
                             .collect();
 
                         self.ast.add_node(Node::Stmt(Stmt::ReactiveStmt { block, dependencies }));
-                        return Expr::Empty;   
+                        return Node::Empty;   
                     }
 
                     // * Otherwise, it's a signal
@@ -436,12 +436,12 @@ impl Parser {
                         self.capturing_signals.last_mut().unwrap().push(ident.value.clone());
                     }
 
-                    buffer.push(Expr::Signal(ident.value.clone()));
+                    buffer.push(Node::Signal(ident.value.clone()));
                     continue;
                 }
 
                 // * Lambda function
-                // {args} => {expr};
+                // {args} => {Node};
                 // {args} => {block}
                 TokenKind::FAT_ARROW => {
 
@@ -458,8 +458,8 @@ impl Parser {
 
                     let args = buffer.pop().unwrap();
 
-                    if args != Expr::WrappedSequence(Vec::new())
-                        && args != Expr::Group(bit!(Expr::Empty))
+                    if args != Node::WrappedSequence(Vec::new())
+                        && args != Node::Group(bit!(Node::Empty))
                     {
                         error!(
                             &self.lexer,
@@ -485,41 +485,41 @@ impl Parser {
                             }
                         }
 
-                        Node::Expr(block)
+                        Node::Node(block)
                     } else {
-                        // Expr
-                        // TODO: This is not good, since the body of the lambda can be a block or an expression
+                        // Node
+                        // TODO: This is not good, since the body of the lambda can be a block or an Nodeession
                         // Unless lambda transpile as actual function, this is not good.
                         // self.stops.push(stop_at); 
-                        let e = self.parse_expr();
+                        let e = self.parse_Node();
                         match e {
                             // This is even worse... Seriously? getting the last stmt just to put something in the body?
-                            Expr::Empty => self.ast.pop_node().unwrap(),
-                            _ => Node::Expr(e),
+                            Node::Empty => self.ast.pop_node().unwrap(),
+                            _ => Node::Node(e),
                         }
                     };
 
                     if self.stopped_at.is_empty() {
                         error!(
                             &self.lexer,
-                            "Expected a block or expression after Lambda function arguments."
+                            "Expected a block or Nodeession after Lambda function arguments."
                         );
                     }
 
                     log!("Lambda function", "args={:?} body={:?}", args, body);
 
-                    return Expr::Lambda {
+                    return Node::Lambda {
                         args: bit!(args),
                         body: bit!(body),
                     };
                 }
 
                 // * Parse Array
-                // [expr, expr, ...]
+                // [Node, Node, ...]
                 TokenKind::L_SQUARE_BRACKET => {
                     log!("parse array");
                     add_stop!(self, R_SQUARE_BRACKET);
-                    let expr = self.parse_expr();
+                    let Node = self.parse_Node();
 
                     // If not closing braket
                     if self.stopped_at.is_empty()
@@ -528,21 +528,21 @@ impl Parser {
                         error!(
                             &self.lexer,
                             "Expected a closing bracket after array.",
-                            format!("[{:?} ... <-- Expected \"]\" here", expr)
+                            format!("[{:?} ... <-- Expected \"]\" here", Node)
                         );
                     }
 
                     self.stopped_at.pop(); // Consume stop, since we DID stop at an ]
 
                     if buffer.is_empty() {
-                        buffer.push(Expr::Array(Box::new(expr)));
+                        buffer.push(Node::Array(Box::new(Node)));
                     }
                     else {
                         // * Indexing -- if there's something on buffer, it's indexing
                         let object = buffer.pop().unwrap();
-                        buffer.push(Expr::Index {
+                        buffer.push(Node::Index {
                             object: bit!(object),
-                            index: bit!(expr),
+                            index: bit!(Node),
                         });
                     }
                     log!("! parse braket done");
@@ -553,26 +553,26 @@ impl Parser {
                 // | {sequence} -> {sequence};
                 // |> {sequence} -> {sequence}
                 TokenKind::PIPE => {
-                    let expr = self.parse_distribution(false);
-                    buffer.push(expr);
+                    let Node = self.parse_distribution(false);
+                    buffer.push(Node);
                     continue;
                 }
 
                 // * Iter distribution
                 // |> {sequence} -> {sequence}
                 TokenKind::PIPE_RIGHT => {
-                    let expr = self.parse_distribution(true);
-                    buffer.push(expr);
+                    let Node = self.parse_distribution(true);
+                    buffer.push(Node);
                     continue;
                 }
 
                 // * Parse Range
-                // {start: expr}..{end: expr} (exclusive)
-                // {start: expr}..={end: expr} (inclusive)
+                // {start: Node}..{end: Node} (exclusive)
+                // {start: Node}..={end: Node} (inclusive)
                 TokenKind::D_DOT => {
                     // Get start of the range, if no start is provided, it's 0
                     let start = if buffer.is_empty() {
-                        Expr::Number("0".to_string())
+                        Node::Number("0".to_string())
                     } else {
                         buffer.pop().unwrap()
                     };
@@ -587,9 +587,9 @@ impl Parser {
 
                     // Might not be needed since we just haven't reached the stop token
                     // self.stops.push(stop_at) 
-                    let end = self.parse_expr(); // this ensures that we can break, since we are complaying with the stop 
+                    let end = self.parse_Node(); // this ensures that we can break, since we are complaying with the stop 
 
-                    buffer.push(Expr::Range {
+                    buffer.push(Node::Range {
                         start: bit!(start),
                         end: bit!(end),
                         inclusive,
@@ -599,46 +599,46 @@ impl Parser {
                 }
 
                 // * Parse Parenthesis (group, sequence)
-                // (expr, expr, ...)
-                // (expr * expr)
+                // (Node, Node, ...)
+                // (Node * Node)
                 TokenKind::L_PARENT => {
 
                     // If next token is R_PARENT, then it's an empty group
-                    let expr = if let Some(TokenKind::R_PARENT) = self.peek_token().map(|t| t.kind) {
+                    let Node = if let Some(TokenKind::R_PARENT) = self.peek_token().map(|t| t.kind) {
                         self.next_token(); // Consume the R_PARENT
-                        Expr::Group(bit!(Expr::Empty))
+                        Node::Group(bit!(Node::Empty))
                     } else {
                         // Otherwise, parse what's inside
                         self.parse_paren()
                     };
 
-                    log!("Parenthesis", "collected={:?}, stopped_at={:?}", expr, self.stopped_at);
+                    log!("Parenthesis", "collected={:?}, stopped_at={:?}", Node, self.stopped_at);
 
                     // * Function call
                     // If there's something in the buffer, it's a function call
                     if let Some(prev) = buffer.pop() {
-                        buffer.push(Expr::FunctionCall {
+                        buffer.push(Node::FunctionCall {
                             name: bit!(prev),
-                            args: bit!(expr),
+                            args: bit!(Node),
                         });
 
                         continue;
                     }
                     
                     // Group or Sequence
-                    buffer.push(expr);
+                    buffer.push(Node);
                     continue;
                 }
 
                 // * Dict
                 TokenKind::L_BRACKET => {
-                    let expr = self.parse_dict();
-                    buffer.push(expr);
+                    let Node = self.parse_dict();
+                    buffer.push(Node);
                     continue;
                 }
 
                 // * Sequenence
-                // {expr}, {expr}, ...
+                // {Node}, {Node}, ...
                 TokenKind::COMMA => {
                     self.capturing_sequence = true;
                     continue;
@@ -649,7 +649,7 @@ impl Parser {
                 // TODO: ASSING is =, -=, *=, ...
                 // Thus, this acceps named args as ident *= value. 
                 TokenKind::ASSIGN => {
-                    log!("parse_expr > Assing | Named arg");
+                    log!("parse_Node > Assing | Named arg");
 
                     // Ensures there's a lhs
                     if buffer.is_empty() {
@@ -667,12 +667,12 @@ impl Parser {
                         // There must be an identifier before =
 
                         match ident {
-                            Expr::Identifier(name) 
-                            | Expr::Signal(name) => {
+                            Node::Identifier(name) 
+                            | Node::Signal(name) => {
                                 // Might not be needed since we just haven't reached the stop token
                                 // self.stops.push(stop_at) 
-                                let value = self.parse_expr();
-                                buffer.push(Expr::NamedArg(name, bit!(value)));
+                                let value = self.parse_Node();
+                                buffer.push(Node::NamedArg(name, bit!(value)));
                             }
 
                             _ => error!(&self.lexer, "Expected an Identifer before \"=\", when parsing named argument.")
@@ -683,26 +683,26 @@ impl Parser {
                     } else {
                         // * parsing assingment
                         // Solve buffer, since it is LHS and
-                        let lhs = self.parse_expr_from_buffer(buffer.clone());
+                        let lhs = self.parse_Node_from_buffer(buffer.clone());
                         buffer.clear(); // Buffer was consumed in lhs
 
-                        self.ast.add_node(Node::Expr(lhs));
+                        self.ast.add_node(Node::Node(lhs));
 
                         self.put_back(token); // put back assingment token since parse_assingment needs to know which type of assingment.
                         let stmt = self.parse_assingment();
                         self.ast.add_node(Node::Stmt(stmt));
 
-                        break; // Finish parse_expr, since we parsed a stmt 
+                        break; // Finish parse_Node, since we parsed a stmt 
                     }
                 }
 
                 // * Member access
                 TokenKind::DOT => {
-                    // If no previous expr, no left hand value
+                    // If no previous Node, no left hand value
                     if buffer.is_empty() {
                         error!(
                             &self.lexer,
-                            "Expected an expression before operator.".to_string(),
+                            "Expected an Nodeession before operator.".to_string(),
                             format!("{:?} ...", token),
                             "^^^ -- Expected something as: object.property".to_string()
                         );
@@ -711,9 +711,9 @@ impl Parser {
                     let lhs = buffer.pop().unwrap();
                     // Might not be needed since we just haven't reached the stop token
                     // self.stops.push(stop_at) 
-                    let member = self.parse_expr();
+                    let member = self.parse_Node();
 
-                    buffer.push(Expr::MemberAccess {
+                    buffer.push(Node::MemberAccess {
                         object: bit!(lhs),
                         member: bit!(member),
                     });
@@ -722,49 +722,49 @@ impl Parser {
                 }
 
                 // * Unary Operator
-                // {op}{expr}
+                // {op}{Node}
                 // Buffer must be empty, since otherwise it isn't a unary operation
                 _ if Lexer::is_bitwise_operator(&token) && buffer.is_empty() => {
                     log!("Unary Operator", "{:?}", token);
 
                     // Might not be needed since we just haven't reached the stop token
                     // self.stops.push(stop_at) 
-                    let expr = self.parse_expr();
+                    let Node = self.parse_Node();
 
-                    buffer.push(Expr::UnaryOp {
+                    buffer.push(Node::UnaryOp {
                         op: token.value.clone(),
-                        expr: bit!(expr),
+                        Node: bit!(Node),
                     });
                 }
 
                 // * Operator
                 _ if Lexer::is_operator_token(&token) => {
-                    // If no previous expr, no left hand value
+                    // If no previous Node, no left hand value
                     if buffer.is_empty() {
                         // If operator is "-" then it's a negation
                         if token.kind == TokenKind::SUBTRACT {
                             // Might not be needed since we just haven't reached the stop token
                             // self.stops.push(stop_at) 
-                            let expr = self.parse_expr();
-                            return Expr::UnaryOp {
+                            let Node = self.parse_Node();
+                            return Node::UnaryOp {
                                 op: '-'.to_string(),
-                                expr: bit!(expr),
+                                Node: bit!(Node),
                             };
                         }
 
                         // If operapor is a "@" then it's a decorator
                         if token.kind == TokenKind::AT {
                             add_stop!(self, L_PARENT);
-                            let name = self.get_expr(&Expr::Identifier(String::new()));
+                            let name = self.get_Node(&Node::Identifier(String::new()));
 
                             if let Some(TokenKind::L_PARENT) = self.stopped_at.pop() {
                                 let args = self.parse_paren();
-                                return Expr::Decorator {
+                                return Node::Decorator {
                                     name: bit!(name),
                                     args: Some(bit!(args)),
                                 };
                             } else {
-                                return Expr::Decorator {
+                                return Node::Decorator {
                                     name: bit!(name),
                                     args: None,
                                 };
@@ -773,9 +773,9 @@ impl Parser {
 
                         error!(
                             &self.lexer,
-                            "Expected an expression before operator.",
+                            "Expected an Nodeession before operator.",
                             format!("<!> {} ...", token.value),
-                            "^^^ -- Expression missing here "
+                            "^^^ -- Nodeession missing here "
                         );
                     }
                     // Might not be needed since we just haven't reached the stop token
@@ -790,7 +790,7 @@ impl Parser {
                     //     && stop_at.contains(self.stopped_at.last().unwrap())
                     // {
                     //     self.stopped_at.pop(); // Remove the stop token
-                    //     return self.parse_expr_from_buffer(buffer);
+                    //     return self.parse_Node_from_buffer(buffer);
                     // }
                 }
 
@@ -804,28 +804,28 @@ impl Parser {
         }
 
         log!(
-            "end parse_expr",
+            "end parse_Node",
             "{:?} stop_at={:?} stopped_at={:?}",
             buffer,
             stop_at,
             self.stopped_at
         );
-        self.parse_expr_from_buffer(buffer)
+        self.parse_Node_from_buffer(buffer)
     }
 
-    /// Parse an expression from a buffer of expressiosn.
-    /// Used to "condence" expressions that are made up of multiple expressions.
+    /// Parse an Nodeession from a buffer of Nodeessiosn.
+    /// Used to "condence" Nodeessions that are made up of multiple Nodeessions.
     /// Ex. (1 + 2) * (2 / 2) -> BinOp(BinOp(1, '+', 2), '*', BinOp(2, '/', 2))
-    fn parse_expr_from_buffer(&mut self, buffer: Vec<Expr>) -> Expr {
+    fn parse_Node_from_buffer(&mut self, buffer: Vec<Node>) -> Node {
         log!(
-            "parse_expr_from_buffer",
+            "parse_Node_from_buffer",
             "buffer={:?}, stopped_at={:?}",
             buffer,
             self.stopped_at
         );
 
         if buffer.is_empty() {
-            return Expr::Empty;
+            return Node::Empty;
         }
 
         if buffer.len() == 1 {
@@ -834,18 +834,18 @@ impl Parser {
 
         if self.capturing_sequence {
             self.capturing_sequence = false;
-            return Expr::Sequence(buffer);
+            return Node::Sequence(buffer);
         }
 
         error!(
             &self.lexer,
-            "Couldn't parse expression",
+            "Couldn't parse Nodeession",
             format!("... {:?} ...", buffer),
             "Whatever this meant to be..."
         )
     }
 
-    /// Parse a distrubution expression.
+    /// Parse a distrubution Nodeession.
     /// Should be called when encountering a PIPE token.
     /// | {sequence} -> {sequence};
     /// |> {sequence} -> {sequence}
@@ -854,27 +854,27 @@ impl Parser {
     /// ```| PI, Coords -> Direction, Distance; ``````
     /// * Iter distribution - Distribute a arguments as iterable
     /// ```|> inputs, outputs -> f1, f2;```  Iterate over inputs and outputs and distribute them into f1 and f2
-    fn parse_distribution(&mut self, is_iter: bool) -> Expr {
+    fn parse_distribution(&mut self, is_iter: bool) -> Node {
         log!("parse_distribution");
 
         add_stop!(self, R_ARROW);
-        let args_expr = self.parse_expr();
+        let args_Node = self.parse_Node();
 
         if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::R_ARROW {
             error!(
                 &self.lexer,
                 "Expected an arrow after arguments when using distribution operator.",
-                format!("| {:?} ... <-- expected \"->\" here", args_expr)
+                format!("| {:?} ... <-- expected \"->\" here", args_Node)
             );
         }
 
-        let args: Vec<Expr> = match args_expr {
-            Expr::Sequence(seq) => seq,
-            _ => vec![args_expr],
+        let args: Vec<Node> = match args_Node {
+            Node::Sequence(seq) => seq,
+            _ => vec![args_Node],
         };
 
         add_stop!(self, SEMICOLON, NEW_LINE);
-        let rec_expr = self.parse_expr();
+        let rec_Node = self.parse_Node();
 
         if self.stopped_at.is_empty() {
             error!(
@@ -882,14 +882,14 @@ impl Parser {
                 "Expected a semicolon or new line after recipients in distribution operator.",
                 format!(
                     "| {:?} -> {:?} ... <- Can't end like this must be \";\" or new line.",
-                    args, rec_expr
+                    args, rec_Node
                 )
             );
         }
 
-        let recipients: Vec<Expr> = match rec_expr {
-            Expr::Sequence(seq) => seq,
-            _ => vec![rec_expr],
+        let recipients: Vec<Node> = match rec_Node {
+            Node::Sequence(seq) => seq,
+            _ => vec![rec_Node],
         };
 
         log!(
@@ -900,34 +900,34 @@ impl Parser {
         );
 
         if is_iter {
-            return Expr::IterDistribution { args, recipients };
+            return Node::IterDistribution { args, recipients };
         }
-        return Expr::Distribution { args, recipients };
+        return Node::Distribution { args, recipients };
     }
 
-    /// Parse a parenthesis expression or a sequence of expressions.
+    /// Parse a parenthesis Nodeession or a sequence of Nodeessions.
     /// Should be called when encountering a L_PAREN token.
     ///
     /// Group
-    /// ({expr} {op} {expr} ...)
+    /// ({Node} {op} {Node} ...)
     ///
     /// Sequence
-    /// ({expr}, {expr}, ...)
-    fn parse_paren(&mut self) -> Expr {
+    /// ({Node}, {Node}, ...)
+    fn parse_paren(&mut self) -> Node {
         log!("parse_paren");
 
         add_stop!(self, R_PARENT);
-        let expr = self.parse_expr();
+        let Node = self.parse_Node();
 
         self.capturing_sequence = true;
 
         if let Some(TokenKind::R_PARENT) = self.stopped_at.pop() {
             self.capturing_sequence = false;
 
-            if let Expr::Sequence(values) = expr {
-                return Expr::WrappedSequence(values);
+            if let Node::Sequence(values) = Node {
+                return Node::WrappedSequence(values);
             } else {
-                return Expr::Group(bit!(expr));
+                return Node::Group(bit!(Node));
             }
         } else {
             error!(
@@ -942,11 +942,11 @@ impl Parser {
     /// Parse a block of code.
     /// ```txt
     /// {
-    ///     statement | expression
-    ///     expression expression is the return value
+    ///     statement | Nodeession
+    ///     Nodeession Nodeession is the return value
     /// }
     /// ```
-    fn parse_block(&mut self) -> Expr {
+    fn parse_block(&mut self) -> Node {
         log!("parse_block");
 
         self.ast.new_scope();
@@ -964,7 +964,7 @@ impl Parser {
         self.global_stop = None;
         self.stopped_at.pop(); // Consume the R_BRACKET
 
-        let block = Expr::Block(self.ast.get_scope());
+        let block = Node::Block(self.ast.get_scope());
         // Go back to the previous scope
         self.ast.pop_scope();
         log!("end parse_block", "{:?}", block);
@@ -977,7 +977,7 @@ impl Parser {
     /// { key, ... }
     /// {}
     /// should be called after encounterin a "{"
-    fn parse_dict(&mut self) -> Expr {
+    fn parse_dict(&mut self) -> Node {
         let mut keys = Vec::new();
         let mut values = Vec::new();
 
@@ -985,7 +985,7 @@ impl Parser {
 
         loop {
             add_stop!(self, COLON, COMMA, R_BRACKET);
-            let key = self.parse_expr();
+            let key = self.parse_Node();
 
             let stop_token = match self.stopped_at.pop() {
                 Some(t) => t,
@@ -1000,7 +1000,7 @@ impl Parser {
             log!("parse_dict", "key={:?} stop_token={:?}", key, stop_token);
 
             // No key, end of dict
-            if key == Expr::Empty {
+            if key == Node::Empty {
                 break;
             }
 
@@ -1008,7 +1008,7 @@ impl Parser {
                 // key, 
                 // key}
                 TokenKind::COMMA | TokenKind::R_BRACKET => {
-                    if let Expr::Identifier(_) = key {
+                    if let Node::Identifier(_) = key {
                         keys.push(key.clone());
                         values.push(key);
 
@@ -1028,7 +1028,7 @@ impl Parser {
                 // key : value
                 TokenKind::COLON => {
                     add_stop!(self, COMMA, R_BRACKET);
-                    let value = self.parse_expr();
+                    let value = self.parse_Node();
                     log!("parse_dict", "key={:?} value={:?}", key, value);
                     keys.push(key);
                     values.push(value);
@@ -1042,26 +1042,26 @@ impl Parser {
         }
 
         log!("end parse_dict", "keys={:?} values={:?}", keys, values);
-        Expr::Dict { keys, values }
+        Node::Dict { keys, values }
     }
 
-    /// Parse a binary operator expression.
+    /// Parse a binary operator Nodeession.
     /// Should be called after encountering an operator token.
-    fn parse_binop(&mut self, left: Expr, operator: Token) -> Expr {
-        let right = self.parse_expr();
-        Expr::BinOp {
+    fn parse_binop(&mut self, left: Node, operator: Token) -> Node {
+        let right = self.parse_Node();
+        Node::BinOp {
             left: Box::new(left),
             op: operator.value,
             right: Box::new(right),
         }
     }
 
-    fn parse_value_token(&self, token: &Token) -> Expr {
+    fn parse_value_token(&self, token: &Token) -> Node {
         log!("parse_value_token", "{:?}", token);
         match token.kind {
-            TokenKind::NUMBER => Expr::Number(token.value.clone()),
-            TokenKind::STRING => Expr::Str(token.value.clone()),
-            TokenKind::IDENTIFIER => Expr::Identifier(token.value.clone()),
+            TokenKind::NUMBER => Node::Number(token.value.clone()),
+            TokenKind::STRING => Node::Str(token.value.clone()),
+            TokenKind::IDENTIFIER => Node::Identifier(token.value.clone()),
             _ => error!(
                 &self.lexer,
                 "Can't parse token to value.",
@@ -1072,15 +1072,15 @@ impl Parser {
     }
 
 
-    /// Parses a conditional statement or expression.
+    /// Parses a conditional statement or Nodeession.
     /// Should be called after encountering an IF token.
     /// ```txt
-    /// if {expr} {block} [elif {expr} {block} ...] [else {block}]
-    fn parse_conditional(&mut self) -> Expr {
+    /// if {Node} {block} [elif {Node} {block} ...] [else {block}]
+    fn parse_conditional(&mut self) -> Node {
         log!("parse_conditional");
 
         add_stop!(self, L_BRACKET);
-        let condition = self.parse_expr();
+        let condition = self.parse_Node();
 
         if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::L_BRACKET {
             error!(
@@ -1095,7 +1095,7 @@ impl Parser {
         let block = self.parse_block();
 
         // Vec<(Condition, Block)>
-        let mut elifs: Vec<(Expr, Expr)> = Vec::new();
+        let mut elifs: Vec<(Node, Node)> = Vec::new();
 
         // Parse elifs
         while let Some(token) = self.peek_token() {
@@ -1106,7 +1106,7 @@ impl Parser {
             self.next_token(); // Consume the ELIF token
 
             add_stop!(self, L_BRACKET);
-            let condition = self.parse_expr();
+            let condition = self.parse_Node();
 
             if self.stopped_at.is_empty() || *self.stopped_at.last().unwrap() != TokenKind::L_BRACKET {
                 error!(
@@ -1121,7 +1121,7 @@ impl Parser {
         }
 
         // Parse else
-        let mut else_block: Option<Box<Expr>> = None;
+        let mut else_block: Option<Box<Node>> = None;
 
         if let Some(TokenKind::ELSE) = self.peek_token().map(|t| t.kind) {
             self.next_token(); // Consume the ELSE token
@@ -1149,7 +1149,7 @@ impl Parser {
             elifs
         );
 
-        Expr::Conditional {
+        Node::Conditional {
             condition: bit!(condition),
             body: bit!(block),
             elifs,
@@ -1159,50 +1159,50 @@ impl Parser {
 
     }
 
-    /// Get an expression of type `expr_type` from the token stream if it exists, otherwise return None.
-    fn get_optional_expr(
+    /// Get an Nodeession of type `Node_type` from the token stream if it exists, otherwise return None.
+    fn get_optional_Node(
         &mut self,
-        expr_type: &Expr,
-    ) -> Option<Expr> {
-        let expr = self.parse_expr();
+        Node_type: &Node,
+    ) -> Option<Node> {
+        let Node = self.parse_Node();
 
-        if expr == Expr::Empty || expr != *expr_type {
+        if Node == Node::Empty || Node != *Node_type {
             error!(
                 &self.lexer,
-                format!("Expected an expression of type {:?}.", expr_type),
-                format!("... {:?}", expr)
+                format!("Expected an Nodeession of type {:?}.", Node_type),
+                format!("... {:?}", Node)
             );
         }
-        return Some(expr);
+        return Some(Node);
     }
 
-    /// Get an expression of type `expr_type` from the token stream. If not found, raise an error.
-    fn get_expr(&mut self, expr_type: &Expr) -> Expr {
-        let expr = self.get_optional_expr(&expr_type);
+    /// Get an Nodeession of type `Node_type` from the token stream. If not found, raise an error.
+    fn get_Node(&mut self, Node_type: &Node) -> Node {
+        let Node = self.get_optional_Node(&Node_type);
 
-        if expr.is_none() {
+        if Node.is_none() {
             error!(
                 &self.lexer,
                 format!(
-                    "Expected an expression of type {:?}.\n Found: {:?}",
-                    expr_type, expr
+                    "Expected an Nodeession of type {:?}.\n Found: {:?}",
+                    Node_type, Node
                 )
             );
         }
 
-        expr.unwrap()
+        Node.unwrap()
     }
 
     /// Called when encountering a Assingment kind token. Needs the token.
     /// LHS (ident) should be in AST.current_scope.
     /// * Assingment statement.
-    /// - `{ident} = {expr};`
+    /// - `{ident} = {Node};`
     /// * Arithmetic assingment statement.
-    /// - `{ident} += {expr};`
+    /// - `{ident} += {Node};`
     /// * Multiple assingment statement.
-    /// - `({ident}, {ident}, ...) = ({expr}, {expr}, ...)`
+    /// - `({ident}, {ident}, ...) = ({Node}, {Node}, ...)`
     /// * Deconstruction
-    /// - `({ident}, {ident}, ...) = {expr}`
+    /// - `({ident}, {ident}, ...) = {Node}`
     fn parse_assingment(&mut self) -> Stmt {
 
         if self.ast.current_scope().is_empty() {
@@ -1216,16 +1216,16 @@ impl Parser {
 
         let op = self.next_token().unwrap().value.clone();
 
-        let ident: Expr = self.ast.pop_node().unwrap().into();
+        let ident: Node = self.ast.pop_node().unwrap().into();
 
         log!("parse_assingment", "{:?} {}", ident, op);
 
         // * Signal definition
-        // {Signal} = {expr}
-        if let Expr::Signal(name) = ident {
+        // {Signal} = {Node}
+        if let Node::Signal(name) = ident {
             self.capturing_signals.push(Vec::new());
 
-            let mut value = self.parse_expr();
+            let mut value = self.parse_Node();
 
             let mut dependencies = self.capturing_signals.pop().unwrap_or_else(|| {
                 error!(&self.lexer, "No signals captured when declaring a signal / no buffer")
@@ -1255,8 +1255,8 @@ impl Parser {
             // If signal is already defined, it's an update
             if self.defined_signals.contains(&name) {
                 if op != "=" {
-                    value = Expr::BinOp {
-                        left: Box::new(Expr::Signal(name.clone())),
+                    value = Node::BinOp {
+                        left: Box::new(Node::Signal(name.clone())),
                         op: op.clone()[..op.len() - 1].to_string(), // Remove "=" because now it's a binop
                         right: Box::new(value.clone()),
                     };
@@ -1277,12 +1277,12 @@ impl Parser {
             }
         }
 
-        let value = self.parse_expr();
+        let value = self.parse_Node();
 
         // Single assingment
-        if ident == Expr::Identifier(String::new())
+        if ident == Node::Identifier(String::new())
              // Multiple assingment
-            || ident == Expr::Sequence(Vec::new())
+            || ident == Node::Sequence(Vec::new())
         {
             return Stmt::Assign {
                 identifiers: vec![ident],
@@ -1292,14 +1292,14 @@ impl Parser {
         }
         // Deconstruction
         else if ident
-            == (Expr::Dict {
+            == (Node::Dict {
                 keys: Vec::new(),
                 values: Vec::new(),
             })
         {
             // Unpack keys from ident
             let keys = match ident {
-                Expr::Dict { keys, values: _ } => keys,
+                Node::Dict { keys, values: _ } => keys,
                 _ => unreachable!(),
             };
 

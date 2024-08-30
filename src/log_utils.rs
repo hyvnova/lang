@@ -2,7 +2,7 @@
 
 use std::process;
 
-use crate::_lexer::Lexer;
+use crate::lexer::Lexer;
 
 /// Prints an error message to the console and exits the program.
 ///
@@ -122,8 +122,8 @@ macro_rules! log {
 #[cfg(not(debug_assertions))]
 #[macro_export]
 macro_rules! log {
-    ($label:expr) => {};
-    ($label:expr, $($arg:tt)*) => {};
+    ($label:Node) => {};
+    ($label:Node, $($arg:tt)*) => {};
 }
 
 
