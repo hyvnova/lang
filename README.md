@@ -3,6 +3,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
 
 ### TODO / LOG
 - Parser Refactor <-
+    - removed tests -- too problematic1
 - Conditionals
     -  If
     - Else

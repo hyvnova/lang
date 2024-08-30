@@ -3,8 +3,8 @@ use std::{fs, path::PathBuf};
 use crate::{
     ast::{Node, AST},
     error,
-    lexer::{Lexer, Token, Kind},
-    log,
+    lexer::{Kind, Lexer, Token},
+    log, signal::clean_signals,
 };
 
 use std::collections::HashSet;
@@ -59,11 +59,11 @@ pub struct Parser<'stop_arr> {
     // When a handler wants to capture signals, it will push a new vector to this variable.
     // The vector will be filled with the signals that the parser captures.
     // Used to keep track of "dependencies" of signals, so we can later on generate the correct code.
-    capturing_signals: Vec<Vec<String>>,
+    capturing_signals: Vec<HashSet<String>>,
 
     // Used to differentiate between signal definition and signal update
     // If a signal is defined, any type of assignment will be considered as a signal update
-    defined_signals: Vec<String>,
+    defined_signals: HashSet<String>,
 }
 
 impl<'stop_arr> Parser<'stop_arr> {
@@ -82,7 +82,7 @@ impl<'stop_arr> Parser<'stop_arr> {
             capturing_sequence: false,
             capturing_signals: Vec::new(),
 
-            defined_signals: Vec::new(),
+            defined_signals: HashSet::new()
         }
     }
 
@@ -350,7 +350,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                 | GT
                 | GE
                 | ADD
-                | MULTIPLY
                 | SUBTRACT
                 | DIVIDE
                 | POW
@@ -366,7 +365,51 @@ impl<'stop_arr> Parser<'stop_arr> {
                 D_DOT => todo!(),
                 DOT => todo!(),
                 HASH => todo!(),
-                DOLLAR_SING => todo!(),
+
+                // * Signal
+                // ${ident}
+                DOLLAR_SING => {
+                    // Parse node after "$"
+                    // If Identifier -> Signal definition/update
+                    // If Block -> Reactive Statement
+                    // Else -> Error
+                    self.capturing_signals.push(HashSet::new()); // Capture signal deps in case is block
+
+                    let node = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected a name (signal identifier) or block (reactive statement) after \"$\". Got nothing.")
+                    });
+
+                    let deps = self.capturing_signals.pop().unwrap_or_else(|| {
+                        error!(&self.lexer, "Couldn't get dependencies for Reactive Statement. -- Prob double pop somewhere")
+                    });
+
+
+                    match node {
+                        // Signal Defition/Update
+                        Node::Identifier(name) => {
+
+                            // If capturing signals, regist in
+                            if let Some(signals) = self.capturing_signals.last_mut() {
+                                signals.insert(name.clone());
+                            }
+
+                            self.ast.add_node(Node::Signal(name));
+                        },
+
+                        // Reactive Statement
+                        Node::Block(block) => {
+                            // Fetch reactive block dependencies
+                            let dependencies: HashSet<String> = clean_signals(&self.ast, deps);
+                            self.ast.add_node(Node::ReactiveStmt { block, dependencies })
+                        }
+
+                        other => error!(&self.lexer, format!("Expected a name (signal identifier) or block (reactive statement) after \"$\". Got: {:?}", other))
+
+                    }
+                    continue;
+
+                },
+                
                 PIPE_RIGHT => todo!(),
                 PIPE_LEFT => todo!(),
                 L_ARROW => todo!(),

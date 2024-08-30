@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -146,7 +148,7 @@ pub enum Node {
     SignalUpdate {
         name: String,
         value: Box<Node>,
-        dependencies: Vec<String>,
+        dependencies: HashSet<String>,
     },
 
     /// Deconstruction
@@ -166,7 +168,7 @@ pub enum Node {
 
     ReactiveStmt{
         block: Vec<Node>,
-        dependencies: Vec<String>,
+        dependencies: HashSet<String>,
     },
 }
 
