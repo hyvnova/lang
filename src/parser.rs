@@ -1,10 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    ast::{Node, AST},
-    error,
-    lexer::{Kind, Lexer, Token},
-    log, signal::clean_signals,
+    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, log_utils::dbg_current_line, signal::clean_signals
 };
 
 use std::collections::HashSet;
@@ -87,7 +84,7 @@ impl<'stop_arr> Parser<'stop_arr> {
         Parser::new(source)
     }
 
-    pub fn next_token(&mut self) -> Option<Token> {
+    fn next_token(&mut self) -> Option<Token> {
         if let Some(token) = self.remainder_token.take() {
             return Some(token);
         }
@@ -96,14 +93,14 @@ impl<'stop_arr> Parser<'stop_arr> {
     }
 
     /// Puts back a token that was read but not processed
-    pub fn put_back(&mut self, token: Token) {
+    fn put_back(&mut self, token: Token) {
         // println!("[put_back] {:?}", token);
         self.remainder_token = Some(token);
     }
 
     /// Returns the next token without consuming it
     /// (It consumes the token but put's it back)
-    pub fn peek_token(&mut self) -> Option<Token> {
+    fn peek_token(&mut self) -> Option<Token> {
         // print!("[peek_token]\n\t");
         let token = self.next_token();
         let copy = token.clone();
@@ -119,14 +116,14 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Parses until one `stop_at` token is found.
     /// Returns the scope of the tokens that were parsed until the stop token was found.
     /// Does not ensure that it stopped at one of the stop tokens.
-    pub fn parse_until(&mut self, stop_at: &'stop_arr [Kind]) -> Vec<Node> {
+    fn parse_until(&mut self, stop_at: &'stop_arr [Kind]) -> Vec<Node> {
         self.stops.push(stop_at);
         self.ast.new_scope();
-        self.parse();
-        let scope = self.ast.pop_scope().unwrap_or_else(|| {
+        self.parse_node();
+        let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
             error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
         });
-        dbg!(&scope.len()); // TODO: loggin scope because currently we don't ahve a way to handle more than 1 Node in scope
+        println!("Parsed Scope ({}): {:?}", scope.len(), scope);
         scope
     }
 
@@ -209,7 +206,18 @@ impl<'stop_arr> Parser<'stop_arr> {
         error!(&self.lexer, format!("Couldn't solve scope: {:?}", scope));
     }
     
+
+    /// Parses the entire source code.
     pub fn parse(&mut self) {
+        // Parse until EOF
+        while let Some(_) = self.peek_token() {
+            self.parse_node();
+        }
+    }
+
+    /// This function performs the "actual" parsing.
+    /// Each node is a expression or statement.
+    fn parse_node(&mut self) {
         // * Parse start
         while let Some(token) = self.next_token() {
 
@@ -228,13 +236,15 @@ impl<'stop_arr> Parser<'stop_arr> {
                 None => EXPR_END,
             };
 
+            println!("Token: {:?}  Stop: {:?}", token.kind, current_stop);
+
             // * Stop at
             if current_stop.contains(&token.kind) {
 
                 if self.capturing_sequence {
                     self.capturing_sequence = false;
 
-                    let seq = self.ast.pop_scope().unwrap_or_else(|| {
+                    let seq: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
                         error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
                     });
                     
@@ -243,6 +253,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.ast.add_node(Node::Sequence(seq));
                 }
 
+                self.stops.pop();
                 self.stopped_at.push(token.kind);
                 return;
             }
@@ -329,11 +340,9 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // * Destructuring/Deconstruction
                 // { dict } { op } {expr} [;]
                 ASSIGN => {
-                    let op = token.value.clone(); // Assignment operator. Ex. `=`, `+=`, `*=`, ...
+                    let op: String = token.value.clone(); // Assignment operator. Ex. `=`, `+=`, `*=`, ...
 
-                    dbg!(self.ast.current_scope());
-                    
-                    let lhs = self.ast.pop_node().unwrap_or_else(|| {
+                    let lhs: Node = self.ast.pop_node().unwrap_or_else(|| {
                         error!(&self.lexer, "No LHS found. Probably node was popped by another handler.");
                     });
 
@@ -341,16 +350,20 @@ impl<'stop_arr> Parser<'stop_arr> {
                     if let Node::Signal(_) = &lhs {
                         self.capturing_signals.push(HashSet::new());
                     }
-                    let rhs = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
+                    println!("stop: {:?}", current_stop);
+
+                    let rhs: Node = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
                         error!(&self.lexer, "Expected an value after assignment operator.")
                     });
 
+                    println!("ASSIGN: {:?} {:?} {:?}", lhs, op, rhs);
+                    
                     match (lhs, rhs) {
                     
                         // * Signal Definition/Update
                         (Node::Signal(name), rhs) => {
                             // Fetch dependencies
-                            let dependencies = clean_signals(&self.ast, self.capturing_signals.pop().unwrap_or_else(|| {
+                            let dependencies: HashSet<String> = clean_signals(&self.ast, self.capturing_signals.pop().unwrap_or_else(|| {
                                 error!(&self.lexer, "Couldn't get dependencies for Signal Definition/Update. -- Prob double pop somewhere")
                             }));
 
@@ -373,13 +386,14 @@ impl<'stop_arr> Parser<'stop_arr> {
                             self.ast.add_node(Node::Assign { identifiers: vec![lhs], values: vec![rhs], op });
                         }
                     }
-
+                    continue;
                 }
                 
                 // * Parenthesis
                 L_PARENT => {
                     let expr = self.parse_paren();
                     self.ast.add_node(expr);
+                    continue;
                 }
                 R_PARENT => error!(&self.lexer, "Unexpected closing parenthesis."),
 
@@ -389,8 +403,28 @@ impl<'stop_arr> Parser<'stop_arr> {
                 R_BRACKET => todo!(),
                 
                 // * Indexing / Arrays
-                L_SQUARE_BRACKET => todo!(),
-                R_SQUARE_BRACKET => todo!(),
+                L_SQUARE_BRACKET => {
+                    let expr = self.parse_until(&[R_SQUARE_BRACKET]).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an Expr after opening square bracket.")
+                    });
+
+                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_SQUARE_BRACKET {
+                        error!(&self.lexer, "Expected a closing square bracket.");
+                    }
+
+                   // If there's someting in the scope, it's an index
+                    if !self.ast.current_scope().is_empty() {
+                        let object = self.ast.pop_node().unwrap();
+
+                        self.ast.add_node(Node::Index { object: bi!(object), index: bi!(expr) });
+                        continue;
+                    }
+
+                    // Array
+                    self.ast.add_node(Node::Array(bi!(expr)));  
+                    continue;                      
+                },
+                R_SQUARE_BRACKET => error!(&self.lexer, "Unexpected closing square bracket."),
 
                 IDENTIFIER => { self.ast.add_node(Node::Identifier(token.value.clone())); }
                 NUMBER => { self.ast.add_node(Node::Number(token.value.clone())); }
@@ -456,8 +490,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                     let seq_start = self.ast.pop_node().unwrap_or_else(|| {
                         error!(&self.lexer, "This \",\" is infront of nothing.")
                     });
-
-                    
                         
                     self.ast.new_scope();
                     self.ast.add_node(seq_start);
@@ -468,8 +500,9 @@ impl<'stop_arr> Parser<'stop_arr> {
                 DOT => todo!(),
                 HASH => todo!(),
 
-                // * Signal
+                // * Signal / Reactive Statement
                 // ${ident}
+                // ${block}
                 DOLLAR_SING => {
                     // Parse node after "$"
                     // If Identifier -> Signal definition/update

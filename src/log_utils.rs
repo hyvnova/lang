@@ -136,3 +136,18 @@ pub fn add_line_numbers(source: &str) -> String {
         .collect::<Vec<String>>()
         .join("\n")
 }
+
+
+
+/// Highlight the current line in the source code.
+/// Ex.
+/// ```
+/// a = 1 + 2
+/// ^^^^^^^^
+/// ```
+pub fn dbg_current_line(lexer: &Lexer) {
+    let line = lexer.source.lines().nth(lexer.line - 1).unwrap_or("! No line found !");
+
+    println!("{}", line);
+    println!("{}", "^".repeat(lexer.column));
+}
