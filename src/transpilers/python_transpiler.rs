@@ -4,6 +4,7 @@
 use crate::ast::{Node, AST};
 use std::fs;
 use std::path::Path;
+use itertools::Itertools; 
 
 trait Transpile {
     fn transpile(&self) -> String;
@@ -133,9 +134,6 @@ impl Transpile for Node {
                     code.push_str(format!("\n\t{}", node.transpile()).as_str());
                 }
 
-                // Last node is returned
-                // code.push_str(format!("\n\treturn {}\n", nodes.last().unwrap().transpile()).as_str());
-
                 code
             },
 
@@ -227,7 +225,6 @@ impl Transpile for Node {
 
             Lambda { args, body } => {
                 let args_str = args.transpile();
-
                 format!("lambda {}: {}", args_str[1..args_str.len()-1].to_string(), body.transpile())
             },
             
@@ -257,11 +254,47 @@ impl Transpile for Node {
                 code
             },
 
-            Python(_) => todo!(),
-            Assign { identifiers, values, op } => todo!(),
-            SignalDef { name, value, dependencies } => todo!(),
+            Python(code) => code.clone(),
+            Assign { identifiers, values, op } => {
+
+                let mut code = String::new();
+
+                for (i, ident) in identifiers.iter().enumerate() {
+                    code.push_str(format!("{} {} {}\n", ident.transpile(), op, values[i].transpile()).as_str());
+                }
+
+                code
+
+            },
+
+            SignalDef { name, value, dependencies } => {
+                format!("{0} = Signal(lambda {0}: {1}, {2})", name, value.transpile(), dependencies.iter().join(", "))
+            },
+            
             SignalUpdate { name, value, dependencies } => todo!(),
-            Deconstruction { identifiers, value } => todo!(),
+
+            // * Deconstruction
+            // Deconstruction is a way to assign values to multiple variables at once
+            // {a, b} = {Node} -> a = Node.a and b = Node.b
+            // {name="John"} = {Node} -> name = Node.get("name", "John")
+            Deconstruction { identifiers, value, default_values } => {
+
+                let mut code = String::new();
+                let value_str = value.transpile();
+
+                for (i, ident) in identifiers.iter().enumerate() {
+                    let default = if i < default_values.len() {
+                        format!(", {}", default_values[i].transpile())
+                    } else {
+                        "".to_string()
+                    };
+
+                    code.push_str(format!("{} = {}.get('{}'{})\n", ident.transpile(), value_str, ident.transpile(), default).as_str());
+                }
+
+                code
+            },
+
             FunctionDef { name, args, body } => todo!(),
             ReactiveStmt { block, dependencies } => todo!(),
         }

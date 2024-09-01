@@ -9,12 +9,6 @@ use crate::{
 
 use std::collections::HashSet;
 
-fn filter_repeated_strings(vec: Vec<String>) -> Vec<String> {
-    let mut seen = HashSet::new();
-    vec.into_iter()
-        .filter(|s| seen.insert(s.clone())) // insert returns false if the value was already in the set
-        .collect()
-}
 
 /// Box-It, bi!
 /// Used to box an Nodeession
@@ -198,6 +192,23 @@ impl<'stop_arr> Parser<'stop_arr> {
         Node::Block(scope)
     }
 
+    /// Tries to figure out what Node a scope is.
+    fn solve_scope(&mut self, scope: Vec<Node>) -> Node {
+        // If there's only one Node in the scope, return it
+        if scope.len() == 1 {
+            return scope.into_iter().next().unwrap();
+        }
+
+        // If capturing sequence, it's a sequence   
+        if self.capturing_sequence {
+            self.capturing_sequence = false;
+            return Node::Sequence(scope);
+        }
+        
+        // Otherwise, we dont know what it is
+        error!(&self.lexer, format!("Couldn't solve scope: {:?}", scope));
+    }
+    
     pub fn parse(&mut self) {
         // * Parse start
         while let Some(token) = self.next_token() {
@@ -219,6 +230,19 @@ impl<'stop_arr> Parser<'stop_arr> {
 
             // * Stop at
             if current_stop.contains(&token.kind) {
+
+                if self.capturing_sequence {
+                    self.capturing_sequence = false;
+
+                    let seq = self.ast.pop_scope().unwrap_or_else(|| {
+                        error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
+                    });
+                    
+                    dbg!(&seq);
+                    
+                    self.ast.add_node(Node::Sequence(seq));
+                }
+
                 self.stopped_at.push(token.kind);
                 return;
             }
@@ -250,6 +274,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     // Ensure token in scope was an identifier
                     let name = match ident_scope {
                         Node::Identifier(name) => name,
+
                         other => error!(&self.lexer, format!("Expected an identifier for function name. Got: {:?}", other)),
                     };
 
@@ -284,13 +309,72 @@ impl<'stop_arr> Parser<'stop_arr> {
                 LOOP => todo!(),
                 FOR => todo!(),
                 WHILE => todo!(),
-                PYTHON => todo!(),
+
+                PYTHON => {
+                    self.ast.add_node(Node::Python(token.value.clone()));
+                }
                 
                 IF => todo!(),
                 ELSE => todo!(),
                 ELIF => todo!(),
 
-                ASSIGN => todo!(),
+                // * Assingments
+                // {ident} {  op = (=, +=, *=, ...) } {expr} [;]
+                // * Multiple assignments
+                // {sequence} { op } {sequence} [;]
+                // * Unpacking
+                // {sequence} { op } {expr} [;]
+                // * Signal Definition/Update
+                // {signal} { op } {expr} [;]
+                // * Destructuring/Deconstruction
+                // { dict } { op } {expr} [;]
+                ASSIGN => {
+                    let op = token.value.clone(); // Assignment operator. Ex. `=`, `+=`, `*=`, ...
+
+                    dbg!(self.ast.current_scope());
+                    
+                    let lhs = self.ast.pop_node().unwrap_or_else(|| {
+                        error!(&self.lexer, "No LHS found. Probably node was popped by another handler.");
+                    });
+
+                    // If LHS is a signal, then we're capturing signals/dependencies
+                    if let Node::Signal(_) = &lhs {
+                        self.capturing_signals.push(HashSet::new());
+                    }
+                    let rhs = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an value after assignment operator.")
+                    });
+
+                    match (lhs, rhs) {
+                    
+                        // * Signal Definition/Update
+                        (Node::Signal(name), rhs) => {
+                            // Fetch dependencies
+                            let dependencies = clean_signals(&self.ast, self.capturing_signals.pop().unwrap_or_else(|| {
+                                error!(&self.lexer, "Couldn't get dependencies for Signal Definition/Update. -- Prob double pop somewhere")
+                            }));
+
+                            // If signal is defined, it's an update
+                            if self.defined_signals.contains(&name) {
+                                self.ast.add_node(Node::SignalUpdate { name, value: bi!(rhs), dependencies });
+                            } else {
+                                self.defined_signals.insert(name.clone());
+                                self.ast.add_node(Node::SignalDef { name, value: bi!(rhs), dependencies });
+                            }
+                        }
+
+                        // * Destructuring/Deconstruction
+                        (Node::Dict { keys, values } , rhs) => {
+                            self.ast.add_node(Node::Deconstruction { identifiers: keys, value: bi!(rhs), default_values: values });
+                        }
+
+                        // * Assingments / Multiple assignments / Unpacking
+                        (lhs, rhs) => {
+                            self.ast.add_node(Node::Assign { identifiers: vec![lhs], values: vec![rhs], op });
+                        }
+                    }
+
+                }
                 
                 // * Parenthesis
                 L_PARENT => {
@@ -361,7 +445,25 @@ impl<'stop_arr> Parser<'stop_arr> {
                 AT => todo!(),
                 COLON => todo!(),
 
-                COMMA => { continue; }
+                COMMA => { 
+                    if self.capturing_sequence {
+                        continue;
+                    }
+
+                    self.capturing_sequence = true;
+                    
+                    // The node before "," is the start of the sequence
+                    let seq_start = self.ast.pop_node().unwrap_or_else(|| {
+                        error!(&self.lexer, "This \",\" is infront of nothing.")
+                    });
+
+                    
+                        
+                    self.ast.new_scope();
+                    self.ast.add_node(seq_start);
+                    continue;
+                },
+
                 D_DOT => todo!(),
                 DOT => todo!(),
                 HASH => todo!(),
@@ -375,9 +477,20 @@ impl<'stop_arr> Parser<'stop_arr> {
                     // Else -> Error
                     self.capturing_signals.push(HashSet::new()); // Capture signal deps in case is block
 
-                    let node = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected a name (signal identifier) or block (reactive statement) after \"$\". Got nothing.")
-                    });
+                    let node: Node = match self.peek_token() {
+                        // If Identifier
+                        Some(Token { kind: Kind::IDENTIFIER, value, .. }) => {
+                            self.next_token(); // Consume identifier
+                            Node::Identifier(value.clone())
+                        }
+                        
+                        // If not identifier, fetch next node, which should be a block 
+                        _ => {
+                            self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
+                                error!(&self.lexer, "Expected an Identifier or Block after \"$\" but got nothing.")
+                            })
+                        }
+                    };
 
                     let deps = self.capturing_signals.pop().unwrap_or_else(|| {
                         error!(&self.lexer, "Couldn't get dependencies for Reactive Statement. -- Prob double pop somewhere")

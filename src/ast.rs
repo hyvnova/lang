@@ -1,5 +1,9 @@
 use std::collections::HashSet;
 
+use clap::error;
+
+use crate::error;
+
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -139,7 +143,7 @@ pub enum Node {
     SignalDef {
         name: String,
         value: Box<Node>,
-        dependencies: Vec<String>,
+        dependencies: HashSet<String>,
     },
 
     /// Signal update
@@ -156,6 +160,7 @@ pub enum Node {
     Deconstruction {
         identifiers: Vec<Node>,
         value: Box<Node>,
+        default_values: Vec<Node>
     },
 
     /// Represents a function declaration.
@@ -265,22 +270,21 @@ impl AST {
 
     /// Finds a Signal's dependencies given it's name
     /// This asumes that the signal exists..
-    pub fn find_signal_deps(&self, target: &str) -> Vec<String> {
-        let mut deps = Vec::new();
+    pub fn find_signal_deps(&self, target: &str) -> HashSet<String> {
         for scope in &self.scope {
             for node in scope {
                 match node {
                     Node::SignalDef {name, dependencies, .. } => {
                         if target == name {
-                            deps = dependencies.clone();
-                            break;
+                            return dependencies.clone();           
                         }
                     }
                     _ => {}
                 }
             }
         }
-        deps
+
+        panic!("Signal {} not found", target);
     }
 }
 
