@@ -121,23 +121,29 @@ impl Transpile for Node {
                 code
             },
 
-            // TODO: Don't know how to implement this yet
             Block(nodes) => {
                 let mut code = String::new();
 
                 if nodes.is_empty() {
-                    code.push_str("\tpass\n");
-                    return code;
+                    return format!("\tpass\n");
                 }
 
-                for node in nodes.iter() {
-                    code.push_str(format!("\n\t{}", node.transpile()).as_str());
+                for node in nodes[0..nodes.len()-1].iter() {
+                    code.push_str(format!("\t{}", node.transpile()).as_str());
+                }
+
+                // Last node is return
+                match nodes.last() {
+                    Some(node) => {
+                        code.push_str(format!("\treturn {}", node.transpile()).as_str());
+                    }
+                    None => {}
                 }
 
                 code
             },
 
-            FunctionCall { name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+            FunctionCall { object: name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");
@@ -154,6 +160,8 @@ impl Transpile for Node {
             },
 
             Alias(name) => format!("as {}", name.transpile()),
+
+            Len(obj) => format!("len({})", obj.transpile()),
 
             Range {
                 start,
@@ -295,7 +303,10 @@ impl Transpile for Node {
                 code
             },
 
-            FunctionDef { name, args, body } => todo!(),
+            FunctionDef { name, args, body } => {
+                format!("def {}{}:{}", name, args.transpile(), body.transpile())
+            },
+            
             ReactiveStmt { block, dependencies } => todo!(),
         }
     }

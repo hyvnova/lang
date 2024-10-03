@@ -3,11 +3,14 @@ A sort of scripting programming language, that is NOT actually a programming lan
 
 ### TODO / LOG
 - Parser Refactor <-
-    - removed tests -- too problematic
+    - [x] Function Def
+    - [x] FunctionCall
+
     - [x] Assingments 
         - Multiple assignments (Sequence doesn't work)
-        
+
     - [x] Signals 
+    - [x] Arrays/Indexing
 
 - Conditionals
     -  If

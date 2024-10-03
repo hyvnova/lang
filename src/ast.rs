@@ -62,7 +62,7 @@ pub enum Node {
 
     /// Represents a function call. Ex. `function(1, 2, 3)`
     FunctionCall {
-        name: Box<Node>,
+        object: Box<Node>,
         args: Box<Node> // Group or Sequence
     },
 
@@ -83,6 +83,9 @@ pub enum Node {
         end: Box<Node>,
         inclusive: bool,
     },
+
+    /// Length
+    Len(Box<Node>),
 
     /// Distribution
     /// | {sequence} -> {recipients};

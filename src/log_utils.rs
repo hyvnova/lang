@@ -86,6 +86,7 @@ macro_rules! error {
 /// A macro for creating debug log messages.
 /// ```
 /// log!("DEBUG", "This is a debug message");
+/// log!("DEBUG", "This is a debug message with a number: {}", 42);
 /// ```
 macro_rules! log {
     ($label:expr) => {{
