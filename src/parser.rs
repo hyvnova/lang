@@ -96,6 +96,14 @@ impl<'stop_arr> Parser<'stop_arr> {
         self.lexer.next()
     }
 
+    /// Cleans-up a stop
+    /// - Pops the last stop from the stops vector
+    /// - Consumes next token, which is asumed to be a stop token.
+    fn clean_stop(&mut self) {
+        self.stops.pop();
+        self.next_token();
+    }
+    
     /// Puts back a token that was read but not processed
     fn put_back(&mut self, token: Token) {
         // println!("[put_back] {:?}", token);
@@ -119,10 +127,12 @@ impl<'stop_arr> Parser<'stop_arr> {
 
     /// Parses until one `stop_at` token is found.
     /// Returns the scope of the tokens that were parsed until the stop token was found.
+    /// ! If the stop token was found, make sure to consume it, since it is not consumed by this function.
     fn parse_until(&mut self, stop_at: Option<&'stop_arr [Kind]>) -> Vec<Node> {
         if let Some(stop_at) = stop_at {
             self.stops.push(stop_at);
         }
+        
         self.ast.new_scope();
         self.parse_node();
 
@@ -156,6 +166,9 @@ impl<'stop_arr> Parser<'stop_arr> {
             error!(&self.lexer, "Expected a closing parenthesis.");
         }
 
+        // handle stop
+        self.clean_stop(); // Consume R_PARENT
+        
         self.parsing_paren = false;
 
         // If there's 1 or less elements in the scope, it's a group
@@ -187,6 +200,8 @@ impl<'stop_arr> Parser<'stop_arr> {
             error!(&self.lexer, "Expected an Node after binary operator.")
         });
         
+        // We don't consume stop token because this handlers doens't sets any.
+
         log!("PARSE BINOP", "RHS: {:?}", rhs);
         
         self.ast.add_node(Node::BinOp { lhs: bi!(lhs), op, rhs: bi!(rhs) });
@@ -212,7 +227,10 @@ impl<'stop_arr> Parser<'stop_arr> {
         if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_BRACKET {
             error!(&self.lexer, "Expected a closing bracket.");
         }
-
+        
+        // Handle stop
+        self.clean_stop(); // Consume R_BRACKET
+        
         Node::Block(scope)
     }
 
@@ -220,21 +238,40 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Parses the entire source code.
     pub fn parse(&mut self) {
         // Parse until EOF
-        while let Some(_) = self.peek_token() {
-            self.parse_node();
+        while let Some(next_token) = self.peek_token() {
+            
+            use Kind::*;
+            match next_token.kind {
+                EOF => {
+                    self.next_token();
+                    break;
+                },
+               
+                NEW_LINE | SEMICOLON => {
+                    self.next_token();
+                    self.ast.add_node(Node::Newline);
+                    continue;
+                },
+                
+                _ => {            
+                    self.parse_node();
+                }
+            }
         }
     }
 
-    /// This function performs the "actual" parsing.
-    /// Each node is a expression or statement.
+    /// - This function performs the "actual" parsing.
+    /// - Each node is a expression or statement.
+    /// - When a stop token is encountered, it is added to `stopped_at` but not consumed.
+    ///     The `stop` that contains the stop token is NOT popped. 
     fn parse_node(&mut self) {
         // * Parse start
-        while let Some(token) = self.next_token() {
+        while let Some(next_token) = self.peek_token() {
 
             // * Global stop at
             if let Some(stop_at) = &self.global_stop {
-                if stop_at.contains(&token.kind) {
-                    self.stopped_at.push(token.kind);
+                if stop_at.contains(&next_token.kind) {
+                    self.stopped_at.push(next_token.kind);
                     return;
                 } 
             }
@@ -246,11 +283,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                 None => EXPR_END,
             };
 
-            println!("{:?}  Stops: {:?}", token, self.stops);
+            println!("->{:?}  Stops: {:?}", next_token, self.stops);
 
             // * Stop at
-            if current_stop.contains(&token.kind) {
-                println!("\tStopping at: {:?}", token);
+            if current_stop.contains(&next_token.kind) {
+                println!("\tStopping at: {:?}", next_token);
 
                 if self.capturing_sequence {
                     self.capturing_sequence = false;
@@ -262,12 +299,13 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.ast.add_node(Node::Sequence(seq));
                 }
 
-                self.stops.pop();
-                self.stopped_at.push(token.kind);
+                self.stopped_at.push(next_token.kind);
                 return;
             }
-
             
+            // Since token exists and it is not a stop token, consume it
+            let token = self.next_token().unwrap();
+
             use Kind::*;
             match token.kind {
                 EOF => {
@@ -290,6 +328,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                     let ident_scope: Node = self.parse_until(Some(&[L_PARENT])).into_iter().next().unwrap_or_else(|| {
                         error!(&self.lexer, "Expected an identifier for function name.")
                     });
+                    
+                    // Consume stop
+                    self.stops.pop();
+                    self.next_token(); // Consume L_PARENT
                     
                     // Ensure token in scope was an identifier
                     let name: String = match ident_scope {
