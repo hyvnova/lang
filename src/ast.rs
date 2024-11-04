@@ -181,7 +181,6 @@ pub enum Node {
 }
 
 
-
 /// Implementing PartialEq for Node to allow for comparison of Nodeessions.
 /// It only checks for type, not the content of the Nodeessions. 
 /// Number(1) == Number(2) will return true.

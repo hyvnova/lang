@@ -54,9 +54,11 @@ fn main() {
     println!("-------------------------------[py output ]----------------------");
 
     // run the python code
-    Command::new("py")
-        .arg("-c")
-        .arg(&code)
+    let mut handle = Command::new("py")
+        .arg("out.py")
         .spawn()
         .expect("failed to execute process");
+
+
+    handle.wait().unwrap();
 }

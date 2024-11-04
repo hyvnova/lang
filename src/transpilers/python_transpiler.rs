@@ -5,6 +5,7 @@ use crate::ast::{Node, AST};
 use std::fs;
 use std::path::Path;
 use itertools::Itertools; 
+use regex::Regex;
 
 trait Transpile {
     fn transpile(&self) -> String;
@@ -70,7 +71,41 @@ impl Transpile for Node {
 
             Number(n) => n.to_string(),
             Identifier(ident) => ident.to_string(),
-            Str(value) => format!("\"{}\"", value),
+            Str(value) => {
+                // * String formatting
+                // Simple
+                // "Hello, {name}" -> f"Hello, {name}"
+
+                // Complex
+                // "Hello %name" -> f"Hello {name}"
+                // "Some {var:args}" -> f"Some {var:args}"
+
+
+                // Captures "%var_name" and "%$signal_name" in strings
+                let simple_format_re: Regex = Regex::new(r"%([$]?[a-zA-Z0-9_]+)").expect("Simple formatting regex failed");
+
+                // Captures "{name} and {name:args}" in strings
+                let complex_format_re: Regex = Regex::new(r"\{\s*([$]?[a-zA-Z0-9_]+)\s*(:\s*.*)?\s*}").expect("Complex formatting regex failed");
+
+                let mut fstring: bool = false;
+
+                // Apply simple formatting
+                let mut new_val: String = simple_format_re.replace_all(value, r"{${1}}").to_string();
+                if new_val != *value { fstring = true; }
+
+                // Apply complex formatting
+                new_val = complex_format_re.replace_all(&new_val, r"{${1}${2}}").to_string();
+                if complex_format_re.is_match(&new_val) { fstring = true; }
+
+                println!("{} -> {}", value, new_val);
+
+                if fstring {
+                    format!("f\"{}\"", new_val)
+                } else {
+                    format!("\"{}\"", value)
+                }
+
+            }
 
             MemberAccess { object, member } => {
                 format!("{}.{}", object.transpile(), member.transpile())
@@ -143,7 +178,12 @@ impl Transpile for Node {
                 code
             },
 
-            FunctionCall { object: name, args } => format!("{}{}", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+
+            // FunctionCall
+            // name(args)
+            // 
+            // Auto-var: Result of the function is assigned to `_`
+            FunctionCall { object: name, args } => format!("(_ := {}{})", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");

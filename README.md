@@ -2,6 +2,8 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO / LOG
+- [x] Lexer error on missing string qoutes
+
 - Parser Refactor <-
     - [x] Function Def
     - [x] FunctionCall
@@ -21,7 +23,6 @@ A sort of scripting programming language, that is NOT actually a programming lan
     - while
     - for
 
-- Fix multiple assignments
  
 # Syntax    
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
@@ -73,4 +74,14 @@ class Person:
 #[endpython]
 
 p = Person("Jonh", 21) // Yes, interop with python
+
+
+// Auto-vars
+input("Enter something: ") // _ will contain the input
+
+
+// Formatting
+a = 1
+"A's value is %a"
+"{a:02d}" // 01
 ```

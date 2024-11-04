@@ -578,7 +578,24 @@ impl Lexer {
         }
 
         loop {
-            let ch = self.next_char();
+            let ch: Option<char> = self.next_char();
+
+            // When capturing string if cahr is a newline and previous char is not a backslash, error missing closing quote
+            if self.capturing_string {
+                if ch.is_none() {
+                    error!(
+                        self,
+                        format!("Missing closing quote for string: {}", value)
+                    );
+                }
+
+                if ch.unwrap() == '\n' && value.chars().last().unwrap_or(' ') != '\\' {
+                    error!(
+                        self,
+                        format!("Missing closing quote for string: {}", value)
+                    );
+                }
+            }
 
             // When capturing a number ensure that after a dot there's a number
             // Otherwise it's not a float but a number followed by a dot

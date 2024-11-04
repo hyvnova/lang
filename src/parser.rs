@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, log_utils::dbg_current_line, signal::clean_signals
+    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, signal::clean_signals
 };
 
 use std::collections::HashSet;
@@ -585,7 +585,10 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                 IDENTIFIER => { self.ast.add_node(Node::Identifier(token.value.clone())); }
                 NUMBER => { self.ast.add_node(Node::Number(token.value.clone())); }
-                STRING => { self.ast.add_node(Node::Str(token.value.clone())); }
+                STRING => { 
+                    // String formatting is done at transpiler level.
+                    self.ast.add_node(Node::Str(token.value.clone())); 
+                }
 
                 // Don't even know what to do with these
                 SINGLE_QUOTE => todo!(),
