@@ -172,7 +172,12 @@ impl Transpile for Node {
                 // Last node is return
                 match nodes.last() {
                     Some(node) => {
-                        code.push_str(format!("\treturn {}", node.transpile()).as_str());
+
+                        if node == &Node::Return(Box::new(Node::Empty)) {
+                            code.push_str(format!("\t{}", node.transpile()).as_str());
+                        } else {
+                            code.push_str(format!("\treturn {}", node.transpile()).as_str());
+                        }
                     }
                     None => {}
                 }
@@ -200,6 +205,8 @@ impl Transpile for Node {
             // 
             // Auto-var: Result of the function is assigned to `_`
             FunctionCall { object: name, args } => format!("(_ := {}{})", name.transpile(), args.transpile()), // Somehow parenthesis are not needed here since args it's a sequence
+
+            Return(value) => format!("\treturn {}", value.transpile()),
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");

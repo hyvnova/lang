@@ -72,6 +72,8 @@ pub enum Node {
         args: Box<Node> // Group or Sequence
     },
 
+    Return(Box<Node>),
+
     /// Dict { key: value, key: value, ... }
     /// { variable,  ... }
     Dict {
@@ -210,6 +212,7 @@ impl PartialEq for Node {
             | (Block(_), Block(_))
             | (FnBody(_), FnBody(_))
             | (FunctionCall { .. }, FunctionCall { .. })
+            | (Return(_), Return(_))
             | (Dict { .. }, Dict { .. })
             | (Alias(_), Alias(_))
             | (Range { .. }, Range { .. })

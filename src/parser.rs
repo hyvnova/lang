@@ -370,6 +370,16 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.ast.add_node(Node::FunctionDef { name, args, body });
                     continue;
                 },
+
+                RETURN => {
+                    let expr: Node = self.parse_until(Some(current_stop)).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an expression after \"return\".")
+                    });
+
+                    self.ast.add_node(Node::Return(bi!(expr)));
+                    continue;
+                }
+
                 
                 CONTINUE => todo!(),
                 BREAK => todo!(),

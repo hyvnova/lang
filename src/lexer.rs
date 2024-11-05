@@ -15,6 +15,7 @@ pub enum Kind {
     //   Instructions
     FN_DEF,    // fn
 
+    RETURN,   // return
     CONTINUE, // continue
     BREAK,    // break
     LOOP,     // loop
@@ -112,6 +113,7 @@ pub enum Kind {
 }
 
 const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
+    "return" => Kind::RETURN,
     "loop" => Kind::LOOP,
     "continue" => Kind::CONTINUE,
     "break" => Kind::BREAK,
