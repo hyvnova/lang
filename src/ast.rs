@@ -58,8 +58,13 @@ pub enum Node {
     /// A sequence wrapped by parenthesis. Ex. `(1, 2, 3)`
     WrappedSequence(Vec<Node>),
 
-    /// Block of code
+    /// Block of code -- scope
     Block(Vec<Node>),
+
+    /// Similar to a Block, but different because of implicit return statement.
+    /// Ex. { print(1) } -> return print(1);
+    /// Block can't have return statement
+    FnBody(Vec<Node>),
 
     /// Represents a function call. Ex. `function(1, 2, 3)`
     FunctionCall {
@@ -203,6 +208,7 @@ impl PartialEq for Node {
             | (Sequence(_), Sequence(_))
             | (WrappedSequence(_), WrappedSequence(_))
             | (Block(_), Block(_))
+            | (FnBody(_), FnBody(_))
             | (FunctionCall { .. }, FunctionCall { .. })
             | (Dict { .. }, Dict { .. })
             | (Alias(_), Alias(_))

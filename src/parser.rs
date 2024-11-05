@@ -212,7 +212,7 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Should be called after encountering an opening bracket.
     /// Ensures that the block is closed.
     /// Returns a Block node.
-    fn parse_block(&mut self) -> Node {
+    fn parse_block(&mut self, is_function: bool) -> Node {
 
         // If next token is a closing bracket, it's an empty block
         if let Some(Token { kind: Kind::R_BRACKET, .. }) = self.peek_token() {
@@ -231,7 +231,11 @@ impl<'stop_arr> Parser<'stop_arr> {
         // Handle stop
         self.clean_stop(); // Consume R_BRACKET
         
-        Node::Block(scope)
+        if is_function {
+            Node::FnBody(scope)
+        } else {
+            Node::Block(scope)
+        }
     }
 
 
@@ -257,6 +261,13 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.parse_node();
                 }
             }
+        }
+    }
+
+    /// Skips newlines
+    fn skip_newlines(&mut self) {
+         while let Some(Token { kind: Kind::NEW_LINE, .. }) = self.peek_token() {
+            self.next_token();
         }
     }
 
@@ -318,10 +329,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
 
                 NEW_LINE | SEMICOLON => {
-                    self.ast.add_node(Node::Newline);
+                    // self.ast.add_node(Node::Newline);
                 }
             
-                // * Funciton Definition
+                // * Function Definition
                 // `def {ident}( {[{ident},]* ) {block}`
                 FN_DEF => {
                     // parse function name
@@ -353,7 +364,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     // Parse function body
-                    let body: Box<Node> = bi!(self.parse_block());
+                    let body: Box<Node> = bi!(self.parse_block(true));
 
                     // Add function to AST
                     self.ast.add_node(Node::FunctionDef { name, args, body });
@@ -376,20 +387,25 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // [else {block}]?
 
                 IF =>{
-                    println!("IF");
+                    log!("IF");
                     let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
                         error!(&self.lexer, "Expected an expression after \"if\".")
                     });
 
                     println!("Condition: {:?}", condition);
 
-                    // Ensure we stop at R_BRACKET
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_BRACKET {
+                    // Ensure we stop at L_BRACKET
+                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::L_BRACKET {
                         error!(&self.lexer, "Expected block after if condition.");
                     }
 
-                    let block: Node = self.parse_block();
+                    self.clean_stop(); // Consume L_BRACKET
+
+                    let block: Node = self.parse_block(false);
                     let mut elifs: Vec<(Node, Node)> = Vec::new();
+
+
+                    self.skip_newlines();
 
                     // Elifs
                     while let Some(Token { kind: ELIF, .. }) = self.peek_token() {
@@ -404,9 +420,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                             error!(&self.lexer, "Expected a block after elif condition.");
                         }
 
-                        let block: Node = self.parse_block();
+                        let block: Node = self.parse_block(false);
                         elifs.push((condition, block));
                     }
+
+                    // skip newlines
+                    self.skip_newlines();
 
                     // Else
                     let mut else_body: Option<Box<Node>> = None;
@@ -419,7 +438,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                             error!(&self.lexer, "Expected a block after else condition.");
                         }
 
-                        let block: Node = self.parse_block();
+                        let block: Node = self.parse_block(false);
                         else_body = Some(bi!(block));
                     }
 
@@ -434,8 +453,8 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                     continue;
                 }
-                ELSE => todo!(),
-                ELIF => todo!(),
+                ELSE => error!(&self.lexer, "Unexpected else statement."),
+                ELIF => error!(&self.lexer, "Unexpected elif statement."),
 
                 // * Assingments
                 // {ident} {  op = (=, +=, *=, ...) } {expr} [;]

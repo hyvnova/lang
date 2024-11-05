@@ -158,7 +158,7 @@ impl Transpile for Node {
                 code
             },
 
-            Block(nodes) => {
+            FnBody(nodes) => {
                 let mut code = String::new();
 
                 if nodes.is_empty() {
@@ -179,6 +179,20 @@ impl Transpile for Node {
 
                 code
             },
+
+            Block(nodes) => {
+                let mut code = String::new();
+                
+                if nodes.is_empty() {
+                    return format!("\tpass\n");
+                }
+
+                for node in nodes {
+                    code.push_str(format!("\t{}\n", node.transpile()).as_str());
+                }
+
+                code
+            }
 
 
             // FunctionCall
@@ -289,7 +303,7 @@ impl Transpile for Node {
                 let mut code = String::new();
 
                 // if
-                code.push_str(format!("if {}:\n\t{}\n", condition.transpile(), body.transpile()).as_str());
+                code.push_str(format!("if {}:\n{}\n", condition.transpile(), body.transpile()).as_str());
             
                 // elifs
                 for (cond, body) in elifs.iter() {

@@ -6,6 +6,8 @@ A sort of scripting programming language, that is NOT actually a programming lan
 
 - Parser Refactor
     - [x] Function Def
+        - [] Return keyword
+
     - [x] FunctionCall
 
     - [x] Assingments 
@@ -14,10 +16,10 @@ A sort of scripting programming language, that is NOT actually a programming lan
     - [ ] Signals 
     - [ ] Arrays/Indexing
 
-- Conditionals <-
-    -  [] If
-    - [] Else
-    - [] Elif
+- [x] Conditionals 
+    - [x] If
+    - [x] Else
+    - [x] Elif
 
 - loops 
     - loop
