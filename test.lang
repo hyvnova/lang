@@ -1,5 +1,1 @@
-a = "Furrito"
-
-print("Hi %a")
-print("Hola {a}")
-print("Adios {a:^20s}")
+if true { print("a") }

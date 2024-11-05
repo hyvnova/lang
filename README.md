@@ -4,20 +4,21 @@ A sort of scripting programming language, that is NOT actually a programming lan
 ### TODO / LOG
 - [x] Lexer error on missing string qoutes
 
-- Parser Refactor <-
+- Parser Refactor
     - [x] Function Def
     - [x] FunctionCall
 
     - [x] Assingments 
         - Multiple assignments (Sequence doesn't work)
 
-    - [x] Signals 
-    - [x] Arrays/Indexing
+    - [ ] Signals 
+    - [ ] Arrays/Indexing
 
-- Conditionals
-    -  If
-    - Else
-    - Elif
+- Conditionals <-
+    -  [] If
+    - [] Else
+    - [] Elif
+
 - loops 
     - loop
     - while

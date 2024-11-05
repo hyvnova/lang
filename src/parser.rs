@@ -371,7 +371,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
                 
                 // * If / Else / Elif
-                // if {expr} {block} [elif {expr} {block}]* [else {block}]*
+                // if {expr} {block} 
+                // [elif {expr} {block}]* 
+                // [else {block}]?
+
                 IF =>{
                     println!("IF");
                     let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
@@ -589,6 +592,9 @@ impl<'stop_arr> Parser<'stop_arr> {
                     // String formatting is done at transpiler level.
                     self.ast.add_node(Node::Str(token.value.clone())); 
                 }
+
+                TRUE => { self.ast.add_node(Node::Bool(true)); }
+                FALSE => { self.ast.add_node(Node::Bool(false)); }
 
                 // Don't even know what to do with these
                 SINGLE_QUOTE => todo!(),

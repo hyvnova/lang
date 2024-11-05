@@ -7,6 +7,8 @@ use std::path::Path;
 use itertools::Itertools; 
 use regex::Regex;
 
+use crate::hyvnts_tools::strings::StrUtils;
+
 trait Transpile {
     fn transpile(&self) -> String;
 }
@@ -97,8 +99,6 @@ impl Transpile for Node {
                 new_val = complex_format_re.replace_all(&new_val, r"{${1}${2}}").to_string();
                 if complex_format_re.is_match(&new_val) { fstring = true; }
 
-                println!("{} -> {}", value, new_val);
-
                 if fstring {
                     format!("f\"{}\"", new_val)
                 } else {
@@ -106,6 +106,8 @@ impl Transpile for Node {
                 }
 
             }
+
+            Bool(b) => b.to_string().capitalize(),
 
             MemberAccess { object, member } => {
                 format!("{}.{}", object.transpile(), member.transpile())

@@ -13,6 +13,7 @@ pub enum Node {
     Number(String),
     Identifier(String),
     Str(String),
+    Bool(bool),
 
     /// Represents a member access in an object through the dot operator.
     /// Example: `object.member`
@@ -193,6 +194,7 @@ impl PartialEq for Node {
             | (Number(_), Number(_))
             | (Identifier(_), Identifier(_))
             | (Str(_), Str(_))
+            | (Bool(_), Bool(_))
             | (MemberAccess { .. }, MemberAccess { .. })
             | (Group(_), Group(_))
             | (BinOp { .. }, BinOp { .. })

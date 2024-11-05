@@ -24,14 +24,14 @@ pub enum Kind {
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
 
-    // Condtionals are here because can be used as Nodeessions
+    // Condtionals are here because can be used as Node
     IF,      // if
     ELSE,     // else
     ELIF,     // elif
 
     ASSIGN,   // =, +=, -=, *=, /=, **=, %=
 
-    // Nodeessions
+    // Node
     //   Parenthesis
     L_PARENT,
     R_PARENT,
@@ -45,10 +45,11 @@ pub enum Kind {
     R_SQUARE_BRACKET, // ]
 
     //   Values
-
     IDENTIFIER,
     NUMBER,
     STRING,
+    TRUE,
+    FALSE,
 
 
     //   Quotes
@@ -120,6 +121,8 @@ const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
     "else" => Kind::ELSE,
     "elif" => Kind::ELIF,
     "fn" => Kind::FN_DEF,
+    "true" => Kind::TRUE,
+    "false" => Kind::FALSE,
 };
 
 impl PartialEq for Kind {
