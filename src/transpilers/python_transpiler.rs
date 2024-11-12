@@ -371,6 +371,31 @@ impl Transpile for Node {
             },
             
             ReactiveStmt { block, dependencies } => todo!(),
+
+
+            Continue => "continue".to_string(),
+            Break => "break".to_string(),
+
+            // * Loop
+            Loop(body) => {
+                format!("while True:\n{}", body.transpile())
+            },
+
+            // * For Loop   
+            ForLoop {
+                item,
+                iterable,
+                body
+            } => {
+                format!("for {} in {}:\n{}", item.transpile(), iterable.transpile(), body.transpile())
+            }
+
+
+            // * While Loop
+            // While loop is a loop that repeats the body until the condition is false
+            WhileLoop { condition, body } => {
+                format!("while {}:\n{}", condition.transpile(), body.transpile())
+            }
         }
     }
 }

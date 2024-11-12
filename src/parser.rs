@@ -1,7 +1,9 @@
+use core::panic;
 use std::{fs, path::PathBuf};
 
 use crate::{
-    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, signal::clean_signals
+    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, signal::clean_signals,
+    parse_utils::IsKind,
 };
 
 use std::collections::HashSet;
@@ -98,10 +100,10 @@ impl<'stop_arr> Parser<'stop_arr> {
 
     /// Cleans-up a stop
     /// - Pops the last stop from the stops vector
-    /// - Consumes next token, which is asumed to be a stop token.
+    /// - Pops the last stopped_at token
     fn clean_stop(&mut self) {
         self.stops.pop();
-        self.next_token();
+        self.stopped_at.pop();
     }
     
     /// Puts back a token that was read but not processed
@@ -129,6 +131,8 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Returns the scope of the tokens that were parsed until the stop token was found.
     /// ! If the stop token was found, make sure to consume it, since it is not consumed by this function.
     fn parse_until(&mut self, stop_at: Option<&'stop_arr [Kind]>) -> Vec<Node> {
+        log!("+ PARSE UNTIL", "Stopping at: {:?}", stop_at);
+        
         if let Some(stop_at) = stop_at {
             self.stops.push(stop_at);
         }
@@ -136,7 +140,7 @@ impl<'stop_arr> Parser<'stop_arr> {
         self.ast.new_scope();
         self.parse_node();
 
-        log!("END PARSE UNTIL", "Stopped at: {:?}", self.stopped_at);
+        log!("- END PARSE UNTIL", "Stopped at: {:?}", self.stopped_at);
         
         let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
             error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
@@ -155,20 +159,17 @@ impl<'stop_arr> Parser<'stop_arr> {
         // Parse until closing parenthesis
         self.parsing_paren = true;
         
-        log!("PARSE PAREN");
-        
         let mut scope: Vec<Node> = self.parse_until(Some(&[Kind::R_PARENT]));
 
         println!("PAREN: {:?}, stopped: {:?}", scope, self.stopped_at);
 
         // Ensure closing parenthesis was found
-        if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_PARENT {
+        if self.next_token().is_not(Kind::R_PARENT) {
             error!(&self.lexer, "Expected a closing parenthesis.");
         }
 
         // handle stop
-        self.clean_stop(); // Consume R_PARENT
-        
+        self.clean_stop(); // Remove R_PARENT stop
         self.parsing_paren = false;
 
         // If there's 1 or less elements in the scope, it's a group
@@ -214,6 +215,8 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Returns a Block node.
     fn parse_block(&mut self, is_function: bool) -> Node {
 
+        log!("PARSE BLOCK");
+
         // If next token is a closing bracket, it's an empty block
         if let Some(Token { kind: Kind::R_BRACKET, .. }) = self.peek_token() {
             self.next_token(); // Consume R_BRACKET
@@ -224,12 +227,11 @@ impl<'stop_arr> Parser<'stop_arr> {
         let scope: Vec<Node> = self.parse_until(Some(&[Kind::R_BRACKET]));
 
         // Ensure closing bracket was found
-        if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_BRACKET {
+        if self.next_token().is_not(Kind::R_BRACKET) {
             error!(&self.lexer, "Expected a closing bracket.");
         }
-        
         // Handle stop
-        self.clean_stop(); // Consume R_BRACKET
+        self.clean_stop(); // Remove R_BRACKET stop
         
         if is_function {
             Node::FnBody(scope)
@@ -340,10 +342,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                         error!(&self.lexer, "Expected an identifier for function name.")
                     });
                     
-                    // Consume stop
-                    self.stops.pop();
-                    self.next_token(); // Consume L_PARENT
+                    if self.next_token().is_not(Kind::L_PARENT) {
+                        error!(&self.lexer, "Expected a parenthesis after function name.");
+                    }
                     
+                    self.clean_stop(); // Remove L_PARENT stop
+
                     // Ensure token in scope was an identifier
                     let name: String = match ident_scope {
                         Node::Identifier(name) => name,
@@ -351,7 +355,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     };
 
                     // Ensure there's a parenthesis after the function name
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::L_PARENT {
+                    if self.next_token().is_not(Kind::L_PARENT) {
                         error!(&self.lexer, "Expected a parenthesis after function name.");
                     }
 
@@ -359,7 +363,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     let args: Box<Node> = bi!(self.parse_paren()); 
 
                     // Ensure there's a block after the arguments
-                    if !self.next_token().map(|t| t.kind == Kind::L_BRACKET).unwrap_or(false) {
+                    if self.next_token().is_not(Kind::L_BRACKET) {
                         error!(&self.lexer, "Expected a block after function arguments.");
                     }
 
@@ -380,12 +384,86 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
 
+                // * IN
+                // Used in for loops (for {item} in {iter})
+                IN => panic!("Unexpected IN token."),
+
+                // * Loop
+                // Repeats the body until explicitly stopped by a BREAK or an exit statement
+                // loop {block} 
+                LOOP => {
+                    // Ensure there's a block after "loop"
+                    if self.peek_token().is(Kind::L_BRACKET) {
+                        self.next_token(); // Consume L_BRACKET
+                    } else {
+                        error!(&self.lexer, "Expected a block after \"loop\".");
+                    }
+
+                    let block: Node = self.parse_block(false);
+                    self.ast.add_node(Node::Loop(bi!(block)));
+                    continue;
+                }
                 
-                CONTINUE => todo!(),
-                BREAK => todo!(),
-                LOOP => todo!(),
-                FOR => todo!(),
-                WHILE => todo!(),
+                CONTINUE => {
+                    self.ast.add_node(Node::Continue);
+                    continue;
+                },
+                BREAK => {
+                    self.ast.add_node(Node::Break);
+                    continue;
+                },
+
+                // * For Loop
+                // for {item} in {iter} {block}
+                FOR => {
+                    let item: Node = self.parse_until(Some(&[IN])).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an identifier after \"for\".")
+                    });
+
+                    if self.next_token().is_not(Kind::IN) {
+                        error!(&self.lexer, "Expected \"in\" after item.");
+                    }
+                   
+                    self.clean_stop(); // Remove IN stop
+
+                    let iterable: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an expression after \"in\".")
+                    });
+
+                    // Ensure there's a block after the expression
+                    if self.next_token().is_not(Kind::L_BRACKET) {
+                        error!(&self.lexer, "Expected a block after expression.");
+                    }
+
+                    self.clean_stop(); // Remove L_BRACKET stop
+
+                    log!("FOR", "Item: {:?} Iterable: {:?}", item, iterable);
+
+                    let block: Node = self.parse_block(false);
+
+                    self.ast.add_node(Node::ForLoop { item: bi!(item), iterable: bi!(iterable), body: bi!(block) });
+                    continue;
+                }
+
+                // * While loop UWU classic while loop. Who doesn't like a cute while loop?
+                // while {expr} {block}
+                WHILE => {
+                    let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an expression after \"while\".")
+                    });
+
+                    // Ensure there's a block after the expression
+                    if self.next_token().is_not(Kind::L_BRACKET) {
+                        error!(&self.lexer, "Expected a block after expression.");
+                    }
+
+                    self.clean_stop(); // Remove L_BRACKET stop
+
+                    let block: Node = self.parse_block(false);
+
+                    self.ast.add_node(Node::WhileLoop { condition: bi!(condition), body: bi!(block) });
+                    continue;
+                }
 
                 PYTHON => {
                     self.ast.add_node(Node::Python(token.value.clone()));
@@ -405,11 +483,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                     println!("Condition: {:?}", condition);
 
                     // Ensure we stop at L_BRACKET
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::L_BRACKET {
+                    if self.next_token().is_not(Kind::L_BRACKET) {
                         error!(&self.lexer, "Expected block after if condition.");
                     }
 
-                    self.clean_stop(); // Consume L_BRACKET
+                    self.clean_stop(); // Remove L_BRACKET stop
 
                     let block: Node = self.parse_block(false);
                     let mut elifs: Vec<(Node, Node)> = Vec::new();
@@ -426,7 +504,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         });
 
                         // Ensure there's a block after the condition
-                        if !self.next_token().map(|t| t.kind == Kind::L_BRACKET).unwrap_or(false) {
+                        if self.next_token().is_not(Kind::L_BRACKET) {
                             error!(&self.lexer, "Expected a block after elif condition.");
                         }
 
@@ -440,11 +518,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                     // Else
                     let mut else_body: Option<Box<Node>> = None;
 
-                    if let Some(Kind::ELSE) = self.peek_token().map(|t| t.kind) {
+                    if self.peek_token().is(Kind::ELSE) {
                         self.next_token(); // Consume ELSE
 
                         // Ensure there's a block after the condition
-                        if !self.next_token().map(|t| t.kind == Kind::L_BRACKET).unwrap_or(false) {
+                        if self.next_token().is_not(Kind::L_BRACKET) {
                             error!(&self.lexer, "Expected a block after else condition.");
                         }
 
@@ -476,12 +554,18 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // {signal} { op } {expr} [;]
                 // * Destructuring/Deconstruction
                 // { dict } { op } {expr} [;]
-                ASSIGN => {
+                ASSIGN | WALRUS => {
+                    // If token it's a walrus operator, then it's an assingment
+                    // Even if we're capturing a sequence, it it's a walres it can't be a named arg
+                    let is_walrus: bool = token.kind == WALRUS;
+
                     let op: String = token.value.clone(); // Assignment operator. Ex. `=`, `+=`, `*=`, ...
 
                     let lhs: Node = self.ast.pop_node().unwrap_or_else(|| {
                         error!(&self.lexer, "No LHS found. Probably node was popped by another handler.");
                     });
+
+                    log!("ASSIGN", "LHS: {:?} {:?}", lhs, op);
 
                     // If LHS is a signal, then we're capturing signals/dependencies
                     if let Node::Signal(_) = &lhs {
@@ -494,7 +578,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 
 
                     // * If parsing parethensis it's a named arg
-                    if self.parsing_paren {
+                    if self.parsing_paren && !is_walrus {
                         println!("NAMED ARG: {:?} {:?} {:?}", lhs, op, rhs);
                         
                         match lhs {
@@ -515,7 +599,8 @@ impl<'stop_arr> Parser<'stop_arr> {
                         continue;
                     }
 
-                    println!("ASSIGN: {:?} {:?} {:?}", lhs, op, rhs);
+
+                    log!("ASSIGN", "\tRHS: {:?}", rhs);
                     
                     match (lhs, rhs) {
                     
@@ -716,6 +801,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                         // This of course will only work if we indexing, otherwise it will be an error.
                         Node::Empty 
                     });
+
+                    if self.stopped_at.is_empty() || !current_stop.contains(&self.stopped_at.pop().unwrap()) {
+                        error!(&self.lexer, "Expected a closing token for range.");
+                    }
+
+                    self.clean_stop(); // Remove stop token
 
                     self.ast.add_node(Node::Range { start: bi!(lhs), end: bi!(rhs), inclusive });
                     continue;

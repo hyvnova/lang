@@ -2,6 +2,8 @@
 
 pub mod cli;
 
+pub mod parse_utils;
+
 pub mod lexer;
 pub mod parser;
 pub mod ast;

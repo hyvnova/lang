@@ -13,23 +13,26 @@ pub enum Kind {
 
     // Statement
     //   Instructions
-    FN_DEF,    // fn
+    FN_DEF,    // fn - function definition 
 
-    RETURN,   // return
-    CONTINUE, // continue
-    BREAK,    // break
     LOOP,     // loop
     FOR,      // for
     WHILE,    // while
 
-    PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
+    RETURN,   // return
+    CONTINUE, // continue
+    BREAK,    // break
 
+    IN,       // in (used in for loops. Ex. for i in range(10) )
+
+    PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
     // Condtionals are here because can be used as Node
     IF,      // if
     ELSE,     // else
     ELIF,     // elif
 
+    WALRUS,   // := (walrus operator)
     ASSIGN,   // =, +=, -=, *=, /=, **=, %=
 
     // Node
@@ -113,16 +116,27 @@ pub enum Kind {
 }
 
 const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
-    "return" => Kind::RETURN,
+    // Loops
     "loop" => Kind::LOOP,
-    "continue" => Kind::CONTINUE,
-    "break" => Kind::BREAK,
     "for" => Kind::FOR,
     "while" => Kind::WHILE,
+    "in" => Kind::IN,
+
+    // Loop Flow control
+    "return" => Kind::RETURN,
+    "continue" => Kind::CONTINUE,
+    "break" => Kind::BREAK,
+    
+
+    // Conditionals
     "if" => Kind::IF,
     "else" => Kind::ELSE,
     "elif" => Kind::ELIF,
+
+    // Function definition
     "fn" => Kind::FN_DEF,
+
+    // Boolean literals
     "true" => Kind::TRUE,
     "false" => Kind::FALSE,
 };
@@ -360,6 +374,7 @@ impl Lexer {
                 return Kind::PIPE_LEFT;
             }
 
+            // Arrow right (->)
             '-' if self.peek_next_char() == Some('>') => {
                 self.current_char_index += 1; // Move past >
                 self.current_token_value = Some("->".to_string());
@@ -367,12 +382,14 @@ impl Lexer {
             }
 
             // Logical
+            // And &&
             '&' if self.peek_next_char() == Some('&') => {
                 self.current_char_index += 1; // Move past &
                 self.current_token_value = Some("&&".to_string());
                 return Kind::AND;
             }
 
+            // Or ||
             '|' if self.peek_next_char() == Some('|') => {
                 self.current_char_index += 1; // Move past |
                 self.current_token_value = Some("||".to_string());
@@ -382,29 +399,40 @@ impl Lexer {
             // Pipe
             '|' => return Kind::BIT_OR,
 
-            // Comparison
+            // *  Comparison
+            // Equal ==
             '=' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("==".to_string());
                 return Kind::EQ;
             }
 
+            // Less than or equal <=
             '<' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("<=".to_string());
                 return Kind::LE;
             }
 
+            // Greater or equal >=
             '>' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some(">=".to_string());
                 return Kind::GE;
             }
 
+            // Not equal !=
             '!' if self.peek_next_char() == Some('=') => {
                 self.current_char_index += 1; // Move past =
                 self.current_token_value = Some("!=".to_string());
                 return Kind::NE;
+            }
+
+            // * Walrus operator
+            ':' if self.peek_next_char() == Some('=') => {
+                self.current_char_index += 1; // Move past =
+                self.current_token_value = Some(":=".to_string());
+                return Kind::WALRUS;
             }
 
             '!' => return Kind::NOT,
@@ -434,6 +462,8 @@ impl Lexer {
             // Arithmetic
             '+' => return Kind::ADD,
             '-' => return Kind::SUBTRACT,
+
+            // Pow **
             _ if ch == '*' && self.peek_next_char() == Some('*') => {
                 self.current_char_index += 1; // Move past *
                 self.column += 1;

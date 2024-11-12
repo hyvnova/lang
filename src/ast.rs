@@ -186,6 +186,27 @@ pub enum Node {
         block: Vec<Node>,
         dependencies: HashSet<String>,
     },
+
+
+    Continue,
+    Break,
+
+    /// Loop
+    /// Repeats the body until the condition exited by a break statement.
+    Loop(Box<Node>), // expects a block as body
+
+    /// For loop
+    ForLoop { 
+        item: Box<Node>, // Identifier or Deconstruction
+        iterable: Box<Node>, // Sequence, Range or expr in general
+        body: Box<Node>, // Block
+    },
+
+    /// While loop
+    WhileLoop {
+        condition: Box<Node>,
+        body: Box<Node>,
+    }
 }
 
 

@@ -91,32 +91,13 @@ macro_rules! error {
 macro_rules! log {
     ($label:expr) => {{
         use colored::*;
-        let log_width = 25; // Adjust width as needed
-
-        // Format and color the label
-        let formatted_label = format!("[{}]", $label).bold().cyan();
-        
-        // Align and print the log entry
-        let padded_label = format!("{:<width$}", formatted_label, width = log_width);
-        
-        println!("{}", padded_label);
+        println!("{}", format!("[{}]", $label).bold().cyan());
     }};
 
     ($label:expr, $($arg:tt)*) => {{
         use colored::*;
-        let log_width = 25; // Adjust width as needed
 
-        // Format the message with the provided arguments
-        let formatted_message = format!($($arg)*).green();
-        
-        // Format and color the label
-        let formatted_label = format!("[{}]", $label).bold().cyan();
-        
-        // Align and print the log entry
-        let padded_label = format!("{:<width$}", formatted_label, width = log_width);
-        let padded_message = format!("{:<width$}", formatted_message, width = log_width);
-        
-        println!("{}{}", padded_label, padded_message);
+        println!("{}\n   {}", format!("[{}]", $label).bold().cyan(), format!($($arg)*).green());
     }};
 }
 

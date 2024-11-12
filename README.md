@@ -14,18 +14,18 @@ A sort of scripting programming language, that is NOT actually a programming lan
     - [x] Assingments 
         - Multiple assignments (Sequence doesn't work)
 
-    - [ ] Signals 
-    - [ ] Arrays/Indexing
+    - [] Signals 
+    - []  Arrays/Indexing
 
 - [x] Conditionals 
     - [x] If
     - [x] Else
     - [x] Elif
 
-- loops 
-    - loop
-    - while
-    - for
+- [] loops <---
+    - [x] loop
+    - [x] while
+    - [x] for
 
  
 # Syntax    
