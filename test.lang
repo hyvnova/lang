@@ -1,17 +1,5 @@
-loop {
-    print("Once")
-    break
-}
-
-for i in 1..=10 {
-    print(i)
-}
-
-a = 10
-
-
-while a < 20 {
-    print(a)
-    a += 1
-}
-
+$a = 1
+$b = $a / 2
+$ { print($a); print($b)}
+for i in 1..10 { $a += i }
+git a

@@ -342,7 +342,9 @@ impl Transpile for Node {
                 format!("{0} = Signal(lambda {0}: {1}, {2})", name, value.transpile(), dependencies.iter().join(", "))
             },
             
-            SignalUpdate { name, value, dependencies } => todo!(),
+            SignalUpdate { name, value, dependencies } =>  {
+                format!("{0}.update(lambda {0}: {1}, {2})", name, value.transpile(), dependencies.iter().join(", "))
+            },
 
             // * Deconstruction
             // Deconstruction is a way to assign values to multiple variables at once
@@ -370,7 +372,17 @@ impl Transpile for Node {
                 format!("def {}{}:{}", name, args.transpile(), body.transpile())
             },
             
-            ReactiveStmt { block, dependencies } => todo!(),
+            ReactiveStmt { block, dependencies } => {
+                // Create function, which is called when dependencies change
+                let mut code = String::from(format!("def __reactive_stmt():\n"));
+                for stmt in block.iter() {
+                    code.push_str(format!("\t{}\n", stmt.transpile()).as_str());
+                }
+
+                // Create reactive statement
+                code.push_str(format!("ReactiveStmt(__reactive_stmt, {})", dependencies.iter().join(", ")).as_str());
+                code
+            }
 
 
             Continue => "continue".to_string(),

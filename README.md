@@ -14,7 +14,11 @@ A sort of scripting programming language, that is NOT actually a programming lan
     - [x] Assingments 
         - Multiple assignments (Sequence doesn't work)
 
-    - [] Signals 
+    - [x] Signals <-- This shit too easy
+        - [x] Signal Def
+        - [x] Signal update
+        - [x] Reactive stmt
+
     - []  Arrays/Indexing
 
 - [x] Conditionals 
@@ -22,7 +26,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
     - [x] Else
     - [x] Elif
 
-- [] loops <---
+- [x] loops
     - [x] loop
     - [x] while
     - [x] for

@@ -2,8 +2,7 @@ use core::panic;
 use std::{fs, path::PathBuf};
 
 use crate::{
-    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, signal::clean_signals,
-    parse_utils::IsKind,
+    ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, parse_utils::{GetFirstOrElse, IsKind}, signal::clean_signals
 };
 
 use std::collections::HashSet;
@@ -136,10 +135,18 @@ impl<'stop_arr> Parser<'stop_arr> {
         if let Some(stop_at) = stop_at {
             self.stops.push(stop_at);
         }
-        
+
+        // Used to track a difference between the number of stops at the start and the end of the function
+        // needed to remove the last stopped_at when no `stop_at` was provided, 
+        // because last stop will be added by default when parser ends at EXPR_END
+        let stops_at_count: usize = self.stopped_at.len();
+
         self.ast.new_scope();
         self.parse_node();
 
+        if stop_at == None && stops_at_count != self.stopped_at.len() {
+            self.stopped_at.pop();
+        }
         log!("- END PARSE UNTIL", "Stopped at: {:?}", self.stopped_at);
         
         let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
@@ -197,7 +204,7 @@ impl<'stop_arr> Parser<'stop_arr> {
         log!("PARSE BINOP", "LHS: {:?} {:?}", lhs, op);
 
         // Parse RHS
-        let rhs: Node = self.parse_until(current_stop).into_iter().next().unwrap_or_else(|| {
+        let rhs: Node = self.parse_until(current_stop).get_first_or_else(|| {
             error!(&self.lexer, "Expected an Node after binary operator.")
         });
         
@@ -338,7 +345,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // `def {ident}( {[{ident},]* ) {block}`
                 FN_DEF => {
                     // parse function name
-                    let ident_scope: Node = self.parse_until(Some(&[L_PARENT])).into_iter().next().unwrap_or_else(|| {
+                    let ident_scope: Node = self.parse_until(Some(&[L_PARENT])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an identifier for function name.")
                     });
                     
@@ -376,7 +383,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 },
 
                 RETURN => {
-                    let expr: Node = self.parse_until(Some(current_stop)).into_iter().next().unwrap_or_else(|| {
+                    let expr: Node = self.parse_until(Some(current_stop)).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an expression after \"return\".")
                     });
 
@@ -416,7 +423,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // * For Loop
                 // for {item} in {iter} {block}
                 FOR => {
-                    let item: Node = self.parse_until(Some(&[IN])).into_iter().next().unwrap_or_else(|| {
+                    let item: Node = self.parse_until(Some(&[IN])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an identifier after \"for\".")
                     });
 
@@ -426,7 +433,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                    
                     self.clean_stop(); // Remove IN stop
 
-                    let iterable: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                    let iterable: Node = self.parse_until(Some(&[L_BRACKET])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an expression after \"in\".")
                     });
 
@@ -448,7 +455,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // * While loop UWU classic while loop. Who doesn't like a cute while loop?
                 // while {expr} {block}
                 WHILE => {
-                    let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                    let condition: Node = self.parse_until(Some(&[L_BRACKET])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an expression after \"while\".")
                     });
 
@@ -476,7 +483,7 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                 IF =>{
                     log!("IF");
-                    let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                    let condition: Node = self.parse_until(Some(&[L_BRACKET])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an expression after \"if\".")
                     });
 
@@ -499,7 +506,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     while let Some(Token { kind: ELIF, .. }) = self.peek_token() {
                         self.next_token(); // Consume ELIF
 
-                        let condition: Node = self.parse_until(Some(&[L_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                        let condition: Node = self.parse_until(Some(&[L_BRACKET])).get_first_or_else(|| {
                             error!(&self.lexer, "Expected an expression after \"elif\".")
                         });
 
@@ -572,7 +579,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         self.capturing_signals.push(HashSet::new());
                     }
 
-                    let rhs: Node = self.parse_until(None).into_iter().next().unwrap_or_else(|| {
+                    let rhs: Node = self.parse_until(None).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an value after assignment operator.")
                     });
                 
@@ -657,21 +664,30 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                 // * Blocks / Dictionaries
                 L_BRACKET => {
-                    self.global_stop = Some(vec![Kind::R_BRACKET]);
-                    self.ast.new_scope();
-                    self.parse();
-                    let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
-                        error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
-                    });
-                    self.ast.add_node(Node::Block(scope));
-                    self.global_stop = None;
+                    log!("Parsing BLOCK");
+
+                    // ! This is technically the right way to do it, but... parse_until it's working fine...
+                    // ! Needs to be a global stop so it is impossible to skip the stop token "}" by mistake
+                    // ! Since a block will have a bunch of different stops
+                    // --- OLD CODE ---
+                    // self.global_stop = Some(vec![Kind::R_BRACKET]);
+                    // Not needed, since parse_until will create a new scope
+                    // self.ast.new_scope(); 
+                    // let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
+                    //    error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
+                    // });
+                    // self.ast.add_node(Node::Block(scope));
+                    // self.global_stop = None;
+
+                    let block: Node = self.parse_block(false);
+                    self.ast.add_node(block);
                     continue;
                 },  
                 R_BRACKET => error!(&self.lexer, "Unexpected closing bracket."),
                 
                 // * Indexing / Arrays
                 L_SQUARE_BRACKET => {
-                    let mut expr = self.parse_until(Some(&[R_SQUARE_BRACKET])).into_iter().next().unwrap_or_else(|| {
+                    let mut expr = self.parse_until(Some(&[R_SQUARE_BRACKET])).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an Expr after opening square bracket.")
                     });
 
@@ -729,7 +745,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         continue;
                     }
 
-                    let expr = self.parse_until(None).into_iter().next().unwrap_or_else(|| {
+                    let expr = self.parse_until(None).get_first_or_else(|| {
                         error!(&self.lexer, "Expected an expr after unary operator.")
                     });
 
@@ -796,7 +812,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         false
                     };
 
-                    let rhs: Node = self.parse_until(Some(current_stop)).into_iter().next().unwrap_or_else(|| {
+                    let rhs: Node = self.parse_until(Some(current_stop)).get_first_or_else(|| {
                         // If there's no RHS, end will be the length of the thing being indexed
                         // This of course will only work if we indexing, otherwise it will be an error.
                         Node::Empty 
@@ -834,17 +850,19 @@ impl<'stop_arr> Parser<'stop_arr> {
                         
                         // If not identifier, fetch next node, which should be a block 
                         _ => {
-                            self.parse_until(Some(current_stop)).into_iter().next().unwrap_or_else(|| {
+                            self.parse_until(None).get_first_or_else(|| {
                                 error!(&self.lexer, "Expected an Identifier or Block after \"$\" but got nothing.")
                             })
                         }
                     };
 
-                    let deps = self.capturing_signals.pop().unwrap_or_else(|| {
+                    let deps: HashSet<String> = self.capturing_signals.pop().unwrap_or_else(|| {
                         error!(&self.lexer, "Couldn't get dependencies for Reactive Statement. -- Prob double pop somewhere")
                     });
 
-
+                    // node can be either an Identifier or a Block
+                    // If it's an Identifier, it's a signal definition/update. If capturing signals, save signal
+                    // If it's a Block, it's a reactive statement
                     match node {
                         // Signal Defition/Update
                         Node::Identifier(name) => {
@@ -854,6 +872,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                                 signals.insert(name.clone());
                             }
 
+                            log!("+", "Signal - Name: {:?}", name);
                             self.ast.add_node(Node::Signal(name));
                         },
 
@@ -861,7 +880,8 @@ impl<'stop_arr> Parser<'stop_arr> {
                         Node::Block(block) => {
                             // Fetch reactive block dependencies
                             let dependencies: HashSet<String> = clean_signals(&self.ast, deps);
-                            self.ast.add_node(Node::ReactiveStmt { block, dependencies })
+                            log!("+", "Reactive Block - Block: {:?}", block);
+                            self.ast.add_node(Node::ReactiveStmt { block, dependencies });
                         }
 
                         other => error!(&self.lexer, format!("Expected a name (signal identifier) or block (reactive statement) after \"$\". Got: {:?}", other))
