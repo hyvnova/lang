@@ -58,6 +58,7 @@ pub struct Parser<'stop_arr> {
     // If a signal is defined, any type of assignment will be considered as a signal update
     defined_signals: HashSet<String>,
 
+
 }
 
 impl<'stop_arr> Parser<'stop_arr> {
@@ -78,6 +79,7 @@ impl<'stop_arr> Parser<'stop_arr> {
             parsing_paren: false,
 
             defined_signals: HashSet::new()
+
 
         }
     }
@@ -343,6 +345,8 @@ impl<'stop_arr> Parser<'stop_arr> {
             
                 // * Function Definition
                 // `def {ident}( {[{ident},]* ) {block}`
+                // Ex. `def add(a, b) { return a + b; }`
+                // |   `def add(a, b) { a + b }`
                 FN_DEF => {
                     // parse function name
                     let ident_scope: Node = self.parse_until(Some(&[L_PARENT])).get_first_or_else(|| {
@@ -828,7 +832,23 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 },
 
-                DOT => todo!(),
+
+                // * Member Acess / Dot Operator / Method Call
+                DOT => {
+                    // Parse property, shoulld be an identifier
+                    let prop: Node = self.parse_until(None).get_first_or_else(|| {
+                        error!(&self.lexer, "Expected a property after \".\".")
+                    });
+
+                    // Get object; value being accessed, should be the last node in the scope
+                    let object: Node = self.ast.pop_node().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an object before \".\".\nEx. object.property \n -If you were trying to access a member of an object.")
+                    });
+
+                    // Otherwise, it's an member access
+                    self.ast.add_node(Node::MemberAccess{ object: bi!(object), member: bi!(prop) });
+                    continue;
+                }
                 HASH => todo!(),
 
                 // * Signal / Reactive Statement
@@ -895,7 +915,25 @@ impl<'stop_arr> Parser<'stop_arr> {
                 PIPE_LEFT => todo!(),
                 L_ARROW => todo!(),
                 R_ARROW => todo!(),
-                FAT_ARROW => todo!(),
+
+                // * Anonymous Function / Lambda
+                // ({args}*,) => {block}
+                // ({args}*,) => {expr}
+                FAT_ARROW =>  {
+                    // Argument should be last node in the scope
+                    // Node should be a WrappedSequence
+                    let args: Node = self.ast.pop_node().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected arguments before \"=>\".")
+                    });
+
+                    // Ensure there's a block or an expression after the arguments
+                    let body: Node = self.parse_until(None).get_first_or_else(|| {
+                        error!(&self.lexer, "Expected a block or an expression after arguments. Ex. \"=> return a + b;\"")
+                    });
+
+                    self.ast.add_node(Node::Lambda { args: bi!(args), body: bi!(body) });
+                    continue;
+                }
             }   
         }
     }
