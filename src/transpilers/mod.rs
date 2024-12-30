@@ -15,9 +15,7 @@ macro_rules! use_transpiler {
     ($transpiler:expr, $ast:ident) => { 
         match $transpiler.as_str() {
             "python" => {
-                crate::transpilers::python_transpiler::transpile(
-                    &$ast
-                )
+                crate::transpilers::python_transpiler::Transpiler::new().transpile(&$ast)
             }
             _ => {
                 panic!("Transpiler {} not found", $transpiler);

@@ -4,80 +4,129 @@
 use crate::ast::{Node, AST};
 use itertools::Itertools;
 use regex::Regex;
-use std::{convert, fs};
+use std::cell::RefCell;
+use std::fs;
 use std::path::Path;
 
 use crate::hyvnts_tools::strings::StrUtils;
 
 trait Transpile {
-    fn transpile(&self) -> String;
+    fn transpile(&self, transpiler: &Transpiler) -> String;
 }
 
-
-
-
-// * Features / Flags
-// TODO: A way to toggle auto-vars and other features
-/// If true, auto-vars will be enabled.
-/// This is be buggy, thus disabled by default.
-/// Auto-vars are variables that are automatically defined when they're used.
-/// Ex. `sum(a, b)` will translate into `( _: = sum(a, b) )`
-const AUTO_VARS: bool = false;
-
-/// If true, sequences will be automatically converted to iterators.
-/// No need to mention this is really bad for performance.
-/// Ex `(1, 2, 3)` -> `Iterator([1, 2, 3])`
-const AUTO_SEQUENCE_TO_ITERATOR: bool = true;
 
 /// Folder containing custom builtins modules for Python
 const BUILTINS_PATH: &str = "./src/transpilers/python/custom_builtins/";
 
-pub fn transpile(ast: &AST) -> String {
-    let mut code = String::new();
 
-    // Include custom builtins
-    if !Path::new(BUILTINS_PATH).exists() {
-        eprintln!(
-            "[Python Transpiler] Custom builtins not found at {}",
-            BUILTINS_PATH
-        );
-        eprintln!("[Python Transpiler] Skipping custom builtins");
-    } else {
-        code.push_str("# Custom builtins\n");
-        code.push_str("import sys\n");
-        code.push_str(format!("sys.path.append('{}')\n", BUILTINS_PATH).as_str());
+/// In charge or managing all the transpilation process, mainly serves as a way for transpilable objects to talk to each other.
+/// Ex. handling scopes and indentation
+pub struct Transpiler {
+    indent: RefCell<usize>,
+    indent_char: String,
 
-        // Iterate over the files in the directory
-        for entry in fs::read_dir(BUILTINS_PATH).expect("Failed to read  custom builtin directory")
-        {
-            let entry = entry.expect("Failed to read entry");
-            let path = entry.path();
+    // * Features / Flags
+    // TODO: A way to toggle auto-vars and other features
+    /// If true, auto-vars will be enabled.
+    /// This is be buggy, thus disabled by default.
+    /// Auto-vars are variables that are automatically defined when they're used.
+    /// Ex. `sum(a, b)` will translate into `( _: = sum(a, b) )`
+    pub auto_vars: bool,
 
-            // Check if it's a  python file and doesn't start
-            if path.is_file()
-                && path.extension().unwrap_or_default() == "py"
-                && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+    /// If true, sequences will be automatically converted to iterators.
+    /// No need to mention this is really bad for performance.
+    /// Ex `(1, 2, 3)` -> `Iterator([1, 2, 3])`
+    pub auto_sequence_to_iterator: bool,
+}
+
+
+impl Transpiler {
+
+    pub fn new() -> Self {
+        Transpiler {
+            indent: RefCell::new(0),
+            indent_char: "\t".to_string(),
+            auto_vars: false,
+            auto_sequence_to_iterator: true,
+        }
+    }
+
+    pub fn transpile(&mut self, ast: &AST) -> String {
+        let mut code = String::new();
+
+        // Include custom builtins
+        // If the builtins directory doesn't exist, skip it
+        if !Path::new(BUILTINS_PATH).exists() {
+            eprintln!(
+                "[Python Transpiler] Custom builtins not found at: {}",
+                BUILTINS_PATH
+            );
+            eprintln!("[Python Transpiler] Skipping custom builtins");
+            
+        // Otherwise, include the builtins
+        } else {
+            code.push_str("# Custom builtins\n");
+            code.push_str("import sys\n");
+            code.push_str(format!("sys.path.append('{}')\n", BUILTINS_PATH).as_str());
+
+            // Iterate over the files in the directory
+            for entry in fs::read_dir(BUILTINS_PATH).expect("Failed to read  custom builtin directory")
             {
-                // Include the file
-                code.push_str(&format!(
-                    "from {} import * \n",
-                    path.file_stem().unwrap().to_str().unwrap()
-                ));
+                let entry: fs::DirEntry = entry.expect("Failed to read entry");
+                let path: std::path::PathBuf = entry.path();
+
+                // Check if it's a  python file and doesn't start
+                if path.is_file()
+                    && path.extension().unwrap_or_default() == "py"
+                    && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+                {
+                    // Include the file
+                    code.push_str(&format!(
+                        "from {} import * \n",
+                        path.file_stem().unwrap().to_str().unwrap()
+                    ));
+                }
             }
+
+            code.push_str("# End of custom builtins\n\n");
         }
 
-        code.push_str("# End of custom builtins\n\n");
+        for node in ast.get_scope() {
+
+            // * Indentation
+            // This really sucks, I wanterd to have a "general" way to know which nodes modify the indent but, I couldn't find a way to do it
+            // Macros would be nice here so I don't need to manually check for each node.
+            // match node {
+            //     Node::Block(_) | Node::FnBody(_) | Node::Conditional { .. } => {
+            //         self.indent += 1;
+            //     }
+            //     _ => { break; }
+            // }
+
+            code.push_str(&format!("{}\n", node.transpile(&self)));
+        }
+
+        code
     }
 
-    for node in ast.get_scope() {
-        code.push_str(&format!("{}\n", node.transpile()));
+
+    /// Returns the current indent string
+    /// Ex. if indent is 2 and indent_char is "\t", this will return "\t\t"
+    pub fn indent(&self) -> String {
+        self.indent_char.repeat(*self.indent.borrow())
     }
 
-    code
+    /// Updates the indent by aadding the given amount
+    /// This is a nasty hack to not need a bunch of mutable borrows
+    pub fn update_indent(&self, amount: isize) {
+        let mut indent = self.indent.borrow_mut();
+        *indent = (*indent as isize + amount) as usize;
+    }
+
 }
 
 impl Transpile for Node {
-    fn transpile(&self) -> String {
+    fn transpile(&self, transpiler: &Transpiler) -> String {
         use Node::*;
         match self {
             Empty => "".to_string(),
@@ -143,88 +192,115 @@ impl Transpile for Node {
             Bool(b) => b.to_string().capitalize(),
 
             MemberAccess { object, member } => {
-                format!("{}.{}", object.transpile(), member.transpile())
+                format!("{}.{}", object.transpile(&transpiler), member.transpile(&transpiler))
             }
 
             Group(expr) => format!(
                 "({})",
                 match expr {
-                    Some(e) => e.transpile(),
+                    Some(e) => e.transpile(&transpiler),
                     None => "".to_string(),
                 }
             ),
 
             BinOp { lhs, op, rhs } => {
-                format!("{} {} {}", lhs.transpile(), op, rhs.transpile())
+                format!("{} {} {}", lhs.transpile(&transpiler), op, rhs.transpile(&transpiler))
             }
 
-            UnaryOp { op, expr } => format!("{}{}", op, expr.transpile()),
+            UnaryOp { op, expr } => format!("{}{}", op, expr.transpile(&transpiler)),
 
-            NamedArg(name, value) => format!("{} = {}", name, value.transpile()),
+            NamedArg(name, value) => format!("{} = {}", name, value.transpile(&transpiler)),
 
             Array(values) => {
-                format!("[{}]", values.transpile())
+                let mut code = String::new();
+
+                // If auto_sequence_to_iterator is enabled, convert the sequence to an iterator
+                if transpiler.auto_sequence_to_iterator {
+                    code.push_str("Iterator([");
+                } else {
+                    code.push_str("[");
+                }
+
+                code.push_str(format!("{}", values.transpile(&transpiler)).as_str());
+
+                if transpiler.auto_sequence_to_iterator {
+                    code.push_str("])");
+                } else {
+                    code.push_str("]");
+                }
+
+                code
             }
 
             Index { object, index } => {
-                format!("{}[{}]", object.transpile(), index.transpile())
+                format!("{}[{}]", object.transpile(&transpiler), index.transpile(&transpiler))
             }
 
             Sequence(values) => {
 
-                let mut code = if AUTO_SEQUENCE_TO_ITERATOR {
-                    String::from("Iterator([")
-                } else {
-                    String::from("")
-                };
+                let mut code = String::new();
+
                 for (i, value) in values.iter().enumerate() {
-                    code.push_str(&value.transpile());
+                    code.push_str(&value.transpile(&transpiler));
                     if i < values.len() - 1 {
                         code.push_str(", ");
                     }
-                }
-
-                if AUTO_SEQUENCE_TO_ITERATOR {
-                    code.push_str("])");
                 }
 
                 code
             }
 
             WrappedSequence(values) => {
-                let mut code = String::from("(");
+                let mut code = String::new();
+
+                if transpiler.auto_sequence_to_iterator {
+                    code.push_str("Iterator([");
+                } else {
+                    code.push_str("(");
+                }
+
                 for (i, value) in values.iter().enumerate() {
-                    code.push_str(&value.transpile());
+                    code.push_str(&value.transpile(&transpiler));
                     if i < values.len() - 1 {
                         code.push_str(", ");
                     }
                 }
-                code.push_str(")");
+                
+                if transpiler.auto_sequence_to_iterator {
+                    code.push_str("])");
+                } else {
+                    code.push_str(")");
+                }
+
                 code
             }
 
             FnBody(nodes) => {
-                let mut code = String::new();
+                let mut code = String::from("\n"); 
+
+                transpiler.update_indent(1);
 
                 if nodes.is_empty() {
-                    return format!("\tpass\n");
+                    return format!("{}pass\n", transpiler.indent());
                 }
 
                 for node in nodes[0..nodes.len() - 1].iter() {
-                    code.push_str(format!("\t{}", node.transpile()).as_str());
+                    code.push_str(format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str());
                 }
 
                 // Last node is return
                 match nodes.last() {
                     Some(node) => {
                         if node == &Node::Return(Box::new(Node::Empty)) {
-                            code.push_str(format!("\t{}", node.transpile()).as_str());
+                            code.push_str(format!("{}{}", transpiler.indent(), node.transpile(&transpiler)).as_str());
                         } else {
-                            code.push_str(format!("\treturn {}", node.transpile()).as_str());
+                            code.push_str(format!("{}return {}", transpiler.indent(), node.transpile(&transpiler)).as_str());
                         }
                     }
                     None => {}
                 }
+
+                transpiler.update_indent(-1);
 
                 code
             }
@@ -233,36 +309,34 @@ impl Transpile for Node {
                 let mut code = String::new();
 
                 if nodes.is_empty() {
-                    return format!("\tpass\n");
+                    return format!("{}pass\n", transpiler.indent());
                 }
 
                 for node in nodes {
-                    code.push_str(format!("\t{}\n", node.transpile()).as_str());
+                    code.push_str(format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str());
                 }
 
                 code
             }
 
             // FunctionCall
-            // name(args)
-            //
+            // fn_name(args)
             // If enabled Auto-var: Result of the function is assigned to `_`
             FunctionCall { object: name, args } => {
-
-                if AUTO_VARS {
-                    format!("(_ := {}{})", name.transpile(), args.transpile()) // Somehow parenthesis are not needed here since args it's a sequence
+                if transpiler.auto_vars {
+                    format!("(_ := {}{})", name.transpile(&transpiler), args.transpile(&transpiler)) // Somehow parenthesis are not needed here since args it's a sequence
                 } else {
-                    format!("{}{}", name.transpile(), args.transpile())
+                    format!("{}{}", name.transpile(&transpiler), args.transpile(&transpiler))
                 }
             }
 
-            Return(value) => format!("\treturn {}", value.transpile()),
+            Return(value) => format!("return {}", value.transpile(&transpiler)),
 
             Dict { keys, values } => {
                 let mut code: String = String::from("{");
                 for (i, key) in keys.iter().enumerate() {
                     code.push_str(
-                        format!("{}: {}", key.transpile(), values[i].transpile()).as_str(),
+                        format!("{}: {}", key.transpile(&transpiler), values[i].transpile(&transpiler)).as_str(),
                     );
                     if i < keys.len() - 1 {
                         code.push_str(", ");
@@ -272,9 +346,9 @@ impl Transpile for Node {
                 code
             }
 
-            Alias(name) => format!("as {}", name.transpile()),
+            Alias(name) => format!("as {}", name.transpile(&transpiler)),
 
-            Len(obj) => format!("len({})", obj.transpile()),
+            Len(obj) => format!("len({})", obj.transpile(&transpiler)),
 
             Range {
                 start,
@@ -283,26 +357,49 @@ impl Transpile for Node {
             } => {
                 format!(
                     "Iterator(tuple(range({}, {}{})))",
-                    start.transpile(),
-                    end.transpile(),
+                    start.transpile(&transpiler),
+                    end.transpile(&transpiler),
                     if *inclusive { "+1" } else { "" }
                 )
             }
 
-            // * Distribution
-            // Distribution pipes args into functions
-            // So, `| a, b -> fn1, fn1;` -> `fn1(a, b); fn2(a, b);`
+            // * Distribution / Foward To
+            // Distribution/pipes/fowards args into functions
+            // So, ` a, b -> fn1, fn2;` -> `fn1(a, b); fn2(a, b);`
             Distribution { args, recipients } => {
                 let mut code = String::new();
 
                 let args_str = args
                     .iter()
-                    .map(|arg| arg.transpile())
+                    .map(|arg| arg.transpile(&transpiler))
                     .collect::<Vec<String>>()
                     .join(", ");
 
+
+                // Auto-var
+                // A tuple with the results of the function is assigned to `_`
+                // Ex. ( _ := (fn1(a, b), fn2(a, b)) )
+
+                if transpiler.auto_vars {
+                    code.push_str("( _ :=");
+                }
+
+                // Start a tuple to store the results of the functions
+                code.push_str("(");
+
                 for func in recipients.iter() {
-                    code.push_str(&format!("{}({});\n", func.transpile(), args_str));
+                    code.push_str(&format!("{}({}), ", func.transpile(&transpiler), args_str));
+                }
+
+                // Remove the last comma and space
+                code.pop(); code.pop();
+
+                // Close the tuple
+                code.push_str(")");
+
+                // If auto-vars is enabled, close the auto-var
+                if transpiler.auto_vars {
+                    code.push_str(")");
                 }
 
                 code
@@ -320,7 +417,7 @@ impl Transpile for Node {
                     .map(|arg| {
                         // Some python magic here --
                         // If values is not iterable in python we will put it inside a tuple
-                        let val = arg.transpile();
+                        let val = arg.transpile(&transpiler);
                         format!(
                             "({} if hasattr({}, '__iter__') else itertools.cycle([{}]))",
                             val, val, val
@@ -334,7 +431,7 @@ impl Transpile for Node {
 
                 code.push_str(format!("for _lang_args in zip({}):\n", args_str).as_str());
                 for func in recipients.iter() {
-                    code.push_str(&format!("\t{}(*_lang_args);\n", func.transpile()));
+                    code.push_str(&format!("\t{}(*_lang_args);\n", func.transpile(&transpiler)));
                 }
 
                 code
@@ -343,9 +440,9 @@ impl Transpile for Node {
             Decorator { name, args } => {
                 format!(
                     "@{}{}",
-                    name.transpile(),
+                    name.transpile(&transpiler),
                     if args.is_some() {
-                        args.clone().unwrap().transpile()
+                        args.clone().unwrap().transpile(&transpiler)
                     } else {
                         "".to_string()
                     }
@@ -353,11 +450,19 @@ impl Transpile for Node {
             }
 
             Lambda { args, body } => {
-                let args_str = args.transpile();
+                let args_str: String = args.transpile(&transpiler);
+
+                // If args_str starts or ends with a parenthesis, remove it
+                let args_str = if args_str.starts_with("(") && args_str.ends_with(")") {
+                    args_str[1..args_str.len() - 1].to_string()
+                } else {
+                    args_str
+                };
+
                 format!(
                     "lambda {}: {}",
-                    args_str[1..args_str.len() - 1].to_string(),
-                    body.transpile()
+                    args_str,
+                    body.transpile(&transpiler)
                 )
             }
 
@@ -373,19 +478,19 @@ impl Transpile for Node {
 
                 // if
                 code.push_str(
-                    format!("if {}:\n{}\n", condition.transpile(), body.transpile()).as_str(),
+                    format!("if {}:\n{}\n", condition.transpile(&transpiler), body.transpile(&transpiler)).as_str(),
                 );
 
                 // elifs
                 for (cond, body) in elifs.iter() {
                     code.push_str(
-                        format!("elif {}:{}\n", cond.transpile(), body.transpile()).as_str(),
+                        format!("elif {}:{}\n", cond.transpile(&transpiler), body.transpile(&transpiler)).as_str(),
                     );
                 }
 
                 // else
                 if let Some(else_body) = else_body {
-                    code.push_str(format!("else:{}\n", else_body.transpile()).as_str());
+                    code.push_str(format!("else:{}\n", else_body.transpile(&transpiler)).as_str());
                 }
 
                 code
@@ -401,7 +506,7 @@ impl Transpile for Node {
 
                 for (i, ident) in identifiers.iter().enumerate() {
                     code.push_str(
-                        format!("{} {} {}\n", ident.transpile(), op, values[i].transpile())
+                        format!("{} {} {}\n", ident.transpile(&transpiler), op, values[i].transpile(&transpiler))
                             .as_str(),
                     );
                 }
@@ -417,7 +522,7 @@ impl Transpile for Node {
                 format!(
                     "{0} = Signal(lambda {0}: {1}, {2})",
                     name,
-                    value.transpile(),
+                    value.transpile(&transpiler),
                     dependencies.iter().join(", ")
                 )
             }
@@ -430,7 +535,7 @@ impl Transpile for Node {
                 format!(
                     "{0}.update(lambda {0}: {1}, {2})",
                     name,
-                    value.transpile(),
+                    value.transpile(&transpiler),
                     dependencies.iter().join(", ")
                 )
             }
@@ -445,11 +550,11 @@ impl Transpile for Node {
                 default_values,
             } => {
                 let mut code = String::new();
-                let value_str = value.transpile();
+                let value_str = value.transpile(&transpiler);
 
                 for (i, ident) in identifiers.iter().enumerate() {
                     let default = if i < default_values.len() {
-                        format!(", {}", default_values[i].transpile())
+                        format!(", {}", default_values[i].transpile(&transpiler))
                     } else {
                         "".to_string()
                     };
@@ -457,9 +562,9 @@ impl Transpile for Node {
                     code.push_str(
                         format!(
                             "{} = {}.get('{}'{})\n",
-                            ident.transpile(),
+                            ident.transpile(&transpiler),
                             value_str,
-                            ident.transpile(),
+                            ident.transpile(&transpiler),
                             default
                         )
                         .as_str(),
@@ -470,7 +575,7 @@ impl Transpile for Node {
             }
 
             FunctionDef { name, args, body } => {
-                format!("def {}{}:{}", name, args.transpile(), body.transpile())
+                format!("def {}{}:{}", name, args.transpile(&transpiler), body.transpile(&transpiler))
             }
 
             ReactiveStmt {
@@ -480,7 +585,7 @@ impl Transpile for Node {
                 // Create function, which is called when dependencies change
                 let mut code = String::from(format!("def __reactive_stmt():\n"));
                 for stmt in block.iter() {
-                    code.push_str(format!("\t{}\n", stmt.transpile()).as_str());
+                    code.push_str(format!("\t{}\n", stmt.transpile(&transpiler)).as_str());
                 }
 
                 // Create reactive statement
@@ -499,7 +604,7 @@ impl Transpile for Node {
 
             // * Loop
             Loop(body) => {
-                format!("while True:\n{}", body.transpile())
+                format!("while True:\n{}", body.transpile(&transpiler))
             }
 
             // * For Loop
@@ -510,16 +615,16 @@ impl Transpile for Node {
             } => {
                 format!(
                     "for {} in {}:\n{}",
-                    item.transpile(),
-                    iterable.transpile(),
-                    body.transpile()
+                    item.transpile(&transpiler),
+                    iterable.transpile(&transpiler),
+                    body.transpile(&transpiler)
                 )
             }
 
             // * While Loop
             // While loop is a loop that repeats the body until the condition is false
             WhileLoop { condition, body } => {
-                format!("while {}:\n{}", condition.transpile(), body.transpile())
+                format!("while {}:\n{}", condition.transpile(&transpiler), body.transpile(&transpiler))
             }
         }
     }

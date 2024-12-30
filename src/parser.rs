@@ -1,5 +1,7 @@
 use core::panic;
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, vec};
+
+use clap::error;
 
 use crate::{
     ast::{Node, AST}, error, lexer::{Kind, Lexer, Token}, log, parse_utils::{GetFirstOrElse, IsKind}, signal::clean_signals
@@ -59,6 +61,11 @@ pub struct Parser<'stop_arr> {
     defined_signals: HashSet<String>,
 
 
+    // When parsing a distribution makes sure parser tops before a "->" so a distribution cannon be used as input for another
+    // And instead the following distribution is considered takes the previous distribution as input
+    // All this is supposed to allow nested distributions
+    parsing_distribution: bool,
+
 }
 
 impl<'stop_arr> Parser<'stop_arr> {
@@ -78,9 +85,9 @@ impl<'stop_arr> Parser<'stop_arr> {
             capturing_signals: Vec::new(),
             parsing_paren: false,
 
-            defined_signals: HashSet::new()
+            defined_signals: HashSet::new(),
 
-
+            parsing_distribution: false,
         }
     }
 
@@ -168,7 +175,7 @@ impl<'stop_arr> Parser<'stop_arr> {
         // Parse until closing parenthesis
         self.parsing_paren = true;
         
-        let mut scope: Vec<Node> = self.parse_until(Some(&[Kind::R_PARENT]));
+        let mut scope = self.parse_until(Some(&[Kind::R_PARENT]));
 
         println!("PAREN: {:?}, stopped: {:?}", scope, self.stopped_at);
 
@@ -264,6 +271,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                
                 NEW_LINE | SEMICOLON => {
                     self.next_token();
+
+                    // If last node was a newline, don't add another one
+                    if let Some(Node::Newline) = self.ast.current_scope().last() {
+                        continue;
+                    }
                     self.ast.add_node(Node::Newline);
                     continue;
                 },
@@ -275,7 +287,8 @@ impl<'stop_arr> Parser<'stop_arr> {
         }
     }
 
-    /// Skips newlines
+    /// Skips newlines.
+    /// Consumes tokens until a token that is not a newline is found.
     fn skip_newlines(&mut self) {
          while let Some(Token { kind: Kind::NEW_LINE, .. }) = self.peek_token() {
             self.next_token();
@@ -321,7 +334,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.ast.add_node(Node::Sequence(seq));
                 }
 
-                self.stopped_at.push(next_token.kind);
                 return;
             }
             
@@ -344,7 +356,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
             
                 // * Function Definition
-                // `def {ident}( {[{ident},]* ) {block}`
+                // `def {ident}( {expr},* ) {block}`
                 // Ex. `def add(a, b) { return a + b; }`
                 // |   `def add(a, b) { a + b }`
                 FN_DEF => {
@@ -364,11 +376,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                         Node::Identifier(name) => name,
                         other => error!(&self.lexer, format!("Expected an identifier for function name. Got: {:?}", other)),
                     };
-
-                    // Ensure there's a parenthesis after the function name
-                    if self.next_token().is_not(Kind::L_PARENT) {
-                        error!(&self.lexer, "Expected a parenthesis after function name.");
-                    }
 
                     // Parse function arguments
                     let args: Box<Node> = bi!(self.parse_paren()); 
@@ -689,18 +696,23 @@ impl<'stop_arr> Parser<'stop_arr> {
                 },  
                 R_BRACKET => error!(&self.lexer, "Unexpected closing bracket."),
                 
-                // * Indexing / Arrays
+                // * Indexing / Arrays 
                 L_SQUARE_BRACKET => {
+
+                    // The expr inside the square brackets can be anything, so we parse until a closing square bracket
                     let mut expr = self.parse_until(Some(&[R_SQUARE_BRACKET])).get_first_or_else(|| {
-                        error!(&self.lexer, "Expected an Expr after opening square bracket.")
+                        error!(&self.lexer, "Expected a closing square bracket at some point after opening one...")
                     });
 
-                    if self.stopped_at.is_empty() || self.stopped_at.pop().unwrap() != Kind::R_SQUARE_BRACKET {
+                    // Ensure there's a closing square bracket
+                    if self.next_token().is_not(Kind::R_SQUARE_BRACKET) {
                         error!(&self.lexer, "Expected a closing square bracket.");
                     }
 
-                   // If there's someting in the scope, it's an index
-                   // If `expr` is a Range and it doesn't have an end, end will be the length of object
+                    self.clean_stop(); // Remove R_SQUARE_BRACKET stop
+
+                    // If there's someting in the scope ( a node right before the [{expr}]), it's an index
+                    // If `expr` is a Range and it doesn't have an end, end  will be the length of object
                     if !self.ast.current_scope().is_empty() {
                         let object: Node = self.ast.pop_node().unwrap();
 
@@ -715,6 +727,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     // Array
+                    log!("ARRAY", "Expr: {:?}", expr);
                     self.ast.add_node(Node::Array(bi!(expr)));  
                     continue;                      
                 },
@@ -787,9 +800,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                     }
 
                     self.capturing_sequence = true;
+                    log!(" /  Capturing Sequence");
                     
                     // The node before "," is the start of the sequence
-                    let seq_start = self.ast.pop_node().unwrap_or_else(|| {
+                    let seq_start: Node = self.ast.pop_node().unwrap_or_else(|| {
                         error!(&self.lexer, "This \",\" is infront of nothing.")
                     });
                         
@@ -832,7 +846,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 },
 
-
                 // * Member Acess / Dot Operator / Method Call
                 DOT => {
                     // Parse property, shoulld be an identifier
@@ -852,8 +865,8 @@ impl<'stop_arr> Parser<'stop_arr> {
                 HASH => todo!(),
 
                 // * Signal / Reactive Statement
-                // ${ident}
-                // ${block}
+                // signal: ${ident}
+                // reactive statement: ${block}
                 DOLLAR_SING => {
                     // Parse node after "$"
                     // If Identifier -> Signal definition/update
@@ -914,7 +927,58 @@ impl<'stop_arr> Parser<'stop_arr> {
                 PIPE_RIGHT => todo!(),
                 PIPE_LEFT => todo!(),
                 L_ARROW => todo!(),
-                R_ARROW => todo!(),
+
+                // * Foward to / Distribution / Pipe
+                // Sintactic Sugar that uses the value on the left and passes it as an argument to the function on the right
+                // {expr} -> {expr}
+                // Ex. names, ages -> print
+                // This forwards names and ages to the print function
+                // This operation can be chained
+                // {expr} -> {expr} -> {expr}
+                // Ex. names, ages -> zip -> print
+                R_ARROW => {
+
+                    // If parsing distribution, stop parsing to avoid conflict with nested distributions
+                    if self.parsing_distribution {
+                        self.clean_stop(); // Remove R_ARROW stop
+                        self.put_back(token); // Put back R_ARROW so distribution can be parsed once the current distribution is done
+                        return;
+                    }
+
+                    // LHS should be the last node in the scope
+                    // Which should be a WrappedSequence or Sequence with the values to forward
+                    let lhs = match self.ast.pop_node().unwrap_or_else(|| {
+                        error!(&self.lexer, "Expected an Node before \"->\".")
+                    }) {
+                        Node::WrappedSequence(seq)
+                        | Node::Sequence(seq) =>  seq,
+
+                        node => { vec![node] },
+                    };
+
+                    self.parsing_distribution = true;
+
+                    // Skip newlines
+                    self.skip_newlines();
+
+                    // The RHS should be the next node
+                    // The destination of the values
+                    let rhs = match self.parse_until(None).get_first_or_else(|| {
+                        error!(&self.lexer, "Expected an Node after \"->\".")
+                    }) {
+                        Node::WrappedSequence(seq)
+                        | Node::Sequence(seq) =>  seq,
+
+                        node => { vec![node] },
+                    };
+
+                    self.parsing_distribution = false;
+
+                    log!("+ Distribution", "LHS: {:?} RHS: {:?}", lhs, rhs);
+
+                    self.ast.add_node(Node::Distribution { args: lhs, recipients: rhs });
+                    continue;
+                }
 
                 // * Anonymous Function / Lambda
                 // ({args}*,) => {block}

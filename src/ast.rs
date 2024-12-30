@@ -182,12 +182,14 @@ pub enum Node {
         body: Box<Node>
     },
 
+    /// Represents a reactive statement.
+    /// A block of code that will be re-executed when any of the dependencies change.
     ReactiveStmt{
         block: Vec<Node>,
         dependencies: HashSet<String>,
     },
 
-
+    /// Control flow
     Continue,
     Break,
 

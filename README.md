@@ -19,7 +19,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
         - [x] Signal update
         - [x] Reactive stmt
 
-    - []  Arrays/Indexing
+    - []  Arrays/Indexing <--
 
 - [x] Conditionals 
     - [x] If
@@ -51,7 +51,7 @@ $ {
 // Distribute
 // Distribute PI and Coords into the Direction and Distance functions.
 // Same as: res = (Direction(PI, Coords), Distance(PI, Coords))
-res = | PI, Coords -> Direction, Distance; 
+res = PI, Coords -> Direction, Distance; 
 
 // Distribute a arguments as iterable
 // Iterate over inputs and outputs and distribute them into f1 and f2

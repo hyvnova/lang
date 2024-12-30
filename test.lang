@@ -1,1 +1,11 @@
-print((1, 2).map((x) => x*2))
+nums = [1, 2, 3, 4, 5];
+
+double = ( arr ) => arr.map( n => n * 2 );
+triple = ( arr ) => arr.map( n => n * 3 );
+
+fn p(x) {
+    print(x)
+    return x
+} 
+
+res = nums -> p -> double -> p -> triple -> p;

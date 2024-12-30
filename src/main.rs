@@ -1,6 +1,6 @@
 use lang::log_utils::add_line_numbers;
 use lang::parser::Parser;
-use lang::transpilers::python_transpiler::transpile;
+use lang::transpilers::python_transpiler::Transpiler;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -30,7 +30,7 @@ fn main() {
         println!("{:?}", node);
     }
 
-    let code = transpile(&ast);
+    let code: String = Transpiler::new().transpile(ast);
 
     if OUTPUT_MODE == 0 || OUTPUT_MODE == 1 {
         println!("\n----------------------------- [transpile to python] ------------------------");
