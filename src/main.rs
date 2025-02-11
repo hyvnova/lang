@@ -27,7 +27,7 @@ fn main() {
     println!("-----------------------------------------------------");
 
     for node in ast.get_scope() {
-        println!("{:?}", node);
+        println!("{:#?}\n", node);
     }
 
     let code: String = Transpiler::new().transpile(ast);

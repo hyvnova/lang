@@ -1,7 +1,7 @@
 /// Transpile to Python
 /// This mode implements the Transpile trait for the AST Node, Stmt and Node
 /// It converts the AST to a string representation of the code in Python
-use crate::ast::{Node, AST};
+use crate::ast::{ Node, AST };
 use itertools::Itertools;
 use regex::Regex;
 use std::cell::RefCell;
@@ -14,10 +14,8 @@ trait Transpile {
     fn transpile(&self, transpiler: &Transpiler) -> String;
 }
 
-
 /// Folder containing custom builtins modules for Python
 const BUILTINS_PATH: &str = "./src/transpilers/python/custom_builtins/";
-
 
 /// In charge or managing all the transpilation process, mainly serves as a way for transpilable objects to talk to each other.
 /// Ex. handling scopes and indentation
@@ -39,9 +37,7 @@ pub struct Transpiler {
     pub auto_sequence_to_iterator: bool,
 }
 
-
 impl Transpiler {
-
     pub fn new() -> Self {
         Transpiler {
             indent: RefCell::new(0),
@@ -57,34 +53,32 @@ impl Transpiler {
         // Include custom builtins
         // If the builtins directory doesn't exist, skip it
         if !Path::new(BUILTINS_PATH).exists() {
-            eprintln!(
-                "[Python Transpiler] Custom builtins not found at: {}",
-                BUILTINS_PATH
-            );
+            eprintln!("[Python Transpiler] Custom builtins not found at: {}", BUILTINS_PATH);
             eprintln!("[Python Transpiler] Skipping custom builtins");
-            
-        // Otherwise, include the builtins
+
+            // Otherwise, include the builtins
         } else {
             code.push_str("# Custom builtins\n");
             code.push_str("import sys\n");
             code.push_str(format!("sys.path.append('{}')\n", BUILTINS_PATH).as_str());
 
             // Iterate over the files in the directory
-            for entry in fs::read_dir(BUILTINS_PATH).expect("Failed to read  custom builtin directory")
-            {
+            for entry in fs
+                ::read_dir(BUILTINS_PATH)
+                .expect("Failed to read  custom builtin directory") {
                 let entry: fs::DirEntry = entry.expect("Failed to read entry");
                 let path: std::path::PathBuf = entry.path();
 
                 // Check if it's a  python file and doesn't start
-                if path.is_file()
-                    && path.extension().unwrap_or_default() == "py"
-                    && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+                if
+                    path.is_file() &&
+                    path.extension().unwrap_or_default() == "py" &&
+                    !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
                 {
                     // Include the file
-                    code.push_str(&format!(
-                        "from {} import * \n",
-                        path.file_stem().unwrap().to_str().unwrap()
-                    ));
+                    code.push_str(
+                        &format!("from {} import * \n", path.file_stem().unwrap().to_str().unwrap())
+                    );
                 }
             }
 
@@ -92,7 +86,6 @@ impl Transpiler {
         }
 
         for node in ast.get_scope() {
-
             // * Indentation
             // This really sucks, I wanterd to have a "general" way to know which nodes modify the indent but, I couldn't find a way to do it
             // Macros would be nice here so I don't need to manually check for each node.
@@ -109,7 +102,6 @@ impl Transpiler {
         code
     }
 
-
     /// Returns the current indent string
     /// Ex. if indent is 2 and indent_char is "\t", this will return "\t\t"
     pub fn indent(&self) -> String {
@@ -120,9 +112,8 @@ impl Transpiler {
     /// This is a nasty hack to not need a bunch of mutable borrows
     pub fn update_indent(&self, amount: isize) {
         let mut indent = self.indent.borrow_mut();
-        *indent = (*indent as isize + amount) as usize;
+        *indent = ((*indent as isize) + amount) as usize;
     }
-
 }
 
 impl Transpile for Node {
@@ -139,7 +130,7 @@ impl Transpile for Node {
                         .lines()
                         .map(|line| format!("# {}\n", line))
                         .collect()
-                // Single line comments
+                    // Single line comments
                 } else {
                     format!("# {}\n", comment)
                 }
@@ -157,27 +148,27 @@ impl Transpile for Node {
                 // "Some {var:args}" -> f"Some {var:args}"
 
                 // Captures "%var_name" and "%$signal_name" in strings
-                let simple_format_re: Regex =
-                    Regex::new(r"%([$]?[a-zA-Z0-9_]+)").expect("Simple formatting regex failed");
+                let simple_format_re: Regex = Regex::new(r"%([$]?[a-zA-Z0-9_]+)").expect(
+                    "Simple formatting regex failed"
+                );
 
                 // Captures "{name} and {name:args}" in strings
-                let complex_format_re: Regex =
-                    Regex::new(r"\{\s*([$]?[a-zA-Z0-9_]+)\s*(:\s*.*)?\s*}")
-                        .expect("Complex formatting regex failed");
+                let complex_format_re: Regex = Regex::new(
+                    r"\{\s*([$]?[a-zA-Z0-9_]+)\s*(:\s*.*)?\s*}"
+                ).expect("Complex formatting regex failed");
 
                 let mut fstring: bool = false;
 
                 // Apply simple formatting
-                let mut new_val: String =
-                    simple_format_re.replace_all(value, r"{${1}}").to_string();
+                let mut new_val: String = simple_format_re
+                    .replace_all(value, r"{${1}}")
+                    .to_string();
                 if new_val != *value {
                     fstring = true;
                 }
 
                 // Apply complex formatting
-                new_val = complex_format_re
-                    .replace_all(&new_val, r"{${1}${2}}")
-                    .to_string();
+                new_val = complex_format_re.replace_all(&new_val, r"{${1}${2}}").to_string();
                 if complex_format_re.is_match(&new_val) {
                     fstring = true;
                 }
@@ -195,13 +186,11 @@ impl Transpile for Node {
                 format!("{}.{}", object.transpile(&transpiler), member.transpile(&transpiler))
             }
 
-            Group(expr) => format!(
-                "({})",
-                match expr {
+            Group(expr) =>
+                format!("({})", match expr {
                     Some(e) => e.transpile(&transpiler),
                     None => "".to_string(),
-                }
-            ),
+                }),
 
             BinOp { lhs, op, rhs } => {
                 format!("{} {} {}", lhs.transpile(&transpiler), op, rhs.transpile(&transpiler))
@@ -237,7 +226,6 @@ impl Transpile for Node {
             }
 
             Sequence(values) => {
-
                 let mut code = String::new();
 
                 for (i, value) in values.iter().enumerate() {
@@ -265,7 +253,7 @@ impl Transpile for Node {
                         code.push_str(", ");
                     }
                 }
-                
+
                 if transpiler.auto_sequence_to_iterator {
                     code.push_str("])");
                 } else {
@@ -276,7 +264,7 @@ impl Transpile for Node {
             }
 
             FnBody(nodes) => {
-                let mut code = String::from("\n"); 
+                let mut code = String::from("\n");
 
                 transpiler.update_indent(1);
 
@@ -285,16 +273,30 @@ impl Transpile for Node {
                 }
 
                 for node in nodes[0..nodes.len() - 1].iter() {
-                    code.push_str(format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str());
+                    code.push_str(
+                        format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str()
+                    );
                 }
 
                 // Last node is return
                 match nodes.last() {
                     Some(node) => {
                         if node == &Node::Return(Box::new(Node::Empty)) {
-                            code.push_str(format!("{}{}", transpiler.indent(), node.transpile(&transpiler)).as_str());
+                            code.push_str(
+                                format!(
+                                    "{}{}",
+                                    transpiler.indent(),
+                                    node.transpile(&transpiler)
+                                ).as_str()
+                            );
                         } else {
-                            code.push_str(format!("{}return {}", transpiler.indent(), node.transpile(&transpiler)).as_str());
+                            code.push_str(
+                                format!(
+                                    "{}return {}",
+                                    transpiler.indent(),
+                                    node.transpile(&transpiler)
+                                ).as_str()
+                            );
                         }
                     }
                     None => {}
@@ -313,7 +315,9 @@ impl Transpile for Node {
                 }
 
                 for node in nodes {
-                    code.push_str(format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str());
+                    code.push_str(
+                        format!("{}{}\n", transpiler.indent(), node.transpile(&transpiler)).as_str()
+                    );
                 }
 
                 code
@@ -336,7 +340,11 @@ impl Transpile for Node {
                 let mut code: String = String::from("{");
                 for (i, key) in keys.iter().enumerate() {
                     code.push_str(
-                        format!("{}: {}", key.transpile(&transpiler), values[i].transpile(&transpiler)).as_str(),
+                        format!(
+                            "{}: {}",
+                            key.transpile(&transpiler),
+                            values[i].transpile(&transpiler)
+                        ).as_str()
                     );
                     if i < keys.len() - 1 {
                         code.push_str(", ");
@@ -350,20 +358,20 @@ impl Transpile for Node {
 
             Len(obj) => format!("len({})", obj.transpile(&transpiler)),
 
-            Range {
-                start,
-                end,
-                inclusive,
-            } => {
+            Range { start, end, inclusive } => {
                 format!(
                     "Iterator(tuple(range({}, {}{})))",
                     start.transpile(&transpiler),
                     end.transpile(&transpiler),
-                    if *inclusive { "+1" } else { "" }
+                    if *inclusive {
+                        "+1"
+                    } else {
+                        ""
+                    }
                 )
             }
 
-            // * Distribution / Foward To
+            // * Distribution / Foward To / Pipe to
             // Distribution/pipes/fowards args into functions
             // So, ` a, b -> fn1, fn2;` -> `fn1(a, b); fn2(a, b);`
             Distribution { args, recipients } => {
@@ -374,7 +382,6 @@ impl Transpile for Node {
                     .map(|arg| arg.transpile(&transpiler))
                     .collect::<Vec<String>>()
                     .join(", ");
-
 
                 // Auto-var
                 // A tuple with the results of the function is assigned to `_`
@@ -392,7 +399,8 @@ impl Transpile for Node {
                 }
 
                 // Remove the last comma and space
-                code.pop(); code.pop();
+                code.pop();
+                code.pop();
 
                 // Close the tuple
                 code.push_str(")");
@@ -420,7 +428,9 @@ impl Transpile for Node {
                         let val = arg.transpile(&transpiler);
                         format!(
                             "({} if hasattr({}, '__iter__') else itertools.cycle([{}]))",
-                            val, val, val
+                            val,
+                            val,
+                            val
                         )
                     })
                     .collect::<Vec<String>>()
@@ -438,15 +448,11 @@ impl Transpile for Node {
             }
 
             Decorator { name, args } => {
-                format!(
-                    "@{}{}",
-                    name.transpile(&transpiler),
-                    if args.is_some() {
-                        args.clone().unwrap().transpile(&transpiler)
-                    } else {
-                        "".to_string()
-                    }
-                )
+                format!("@{}{}", name.transpile(&transpiler), if args.is_some() {
+                    args.clone().unwrap().transpile(&transpiler)
+                } else {
+                    "".to_string()
+                })
             }
 
             Lambda { args, body } => {
@@ -459,32 +465,31 @@ impl Transpile for Node {
                     args_str
                 };
 
-                format!(
-                    "lambda {}: {}",
-                    args_str,
-                    body.transpile(&transpiler)
-                )
+                format!("lambda {}: {}", args_str, body.transpile(&transpiler))
             }
 
             Signal(name) => format!("{}.value", name),
 
-            Conditional {
-                condition,
-                body,
-                elifs,
-                else_body,
-            } => {
+            Conditional { condition, body, elifs, else_body } => {
                 let mut code = String::new();
 
                 // if
                 code.push_str(
-                    format!("if {}:\n{}\n", condition.transpile(&transpiler), body.transpile(&transpiler)).as_str(),
+                    format!(
+                        "if {}:\n{}\n",
+                        condition.transpile(&transpiler),
+                        body.transpile(&transpiler)
+                    ).as_str()
                 );
 
                 // elifs
                 for (cond, body) in elifs.iter() {
                     code.push_str(
-                        format!("elif {}:{}\n", cond.transpile(&transpiler), body.transpile(&transpiler)).as_str(),
+                        format!(
+                            "elif {}:{}\n",
+                            cond.transpile(&transpiler),
+                            body.transpile(&transpiler)
+                        ).as_str()
                     );
                 }
 
@@ -497,28 +502,24 @@ impl Transpile for Node {
             }
 
             Python(code) => code.clone(),
-            Assign {
-                identifiers,
-                values,
-                op,
-            } => {
+            Assign { identifiers, values, op } => {
                 let mut code = String::new();
 
                 for (i, ident) in identifiers.iter().enumerate() {
                     code.push_str(
-                        format!("{} {} {}\n", ident.transpile(&transpiler), op, values[i].transpile(&transpiler))
-                            .as_str(),
+                        format!(
+                            "{} {} {}\n",
+                            ident.transpile(&transpiler),
+                            op,
+                            values[i].transpile(&transpiler)
+                        ).as_str()
                     );
                 }
 
                 code
             }
 
-            SignalDef {
-                name,
-                value,
-                dependencies,
-            } => {
+            SignalDef { name, value, dependencies } => {
                 format!(
                     "{0} = Signal(lambda {0}: {1}, {2})",
                     name,
@@ -527,11 +528,7 @@ impl Transpile for Node {
                 )
             }
 
-            SignalUpdate {
-                name,
-                value,
-                dependencies,
-            } => {
+            SignalUpdate { name, value, dependencies } => {
                 format!(
                     "{0}.update(lambda {0}: {1}, {2})",
                     name,
@@ -544,11 +541,7 @@ impl Transpile for Node {
             // Deconstruction is a way to assign values to multiple variables at once
             // {a, b} = {Node} -> a = Node.a and b = Node.b
             // {name="John"} = {Node} -> name = Node.get("name", "John")
-            Deconstruction {
-                identifiers,
-                value,
-                default_values,
-            } => {
+            Deconstruction { identifiers, value, default_values } => {
                 let mut code = String::new();
                 let value_str = value.transpile(&transpiler);
 
@@ -566,8 +559,7 @@ impl Transpile for Node {
                             value_str,
                             ident.transpile(&transpiler),
                             default
-                        )
-                        .as_str(),
+                        ).as_str()
                     );
                 }
 
@@ -575,13 +567,15 @@ impl Transpile for Node {
             }
 
             FunctionDef { name, args, body } => {
-                format!("def {}{}:{}", name, args.transpile(&transpiler), body.transpile(&transpiler))
+                format!(
+                    "def {}{}:{}",
+                    name,
+                    args.transpile(&transpiler),
+                    body.transpile(&transpiler)
+                )
             }
 
-            ReactiveStmt {
-                block,
-                dependencies,
-            } => {
+            ReactiveStmt { block, dependencies } => {
                 // Create function, which is called when dependencies change
                 let mut code = String::from(format!("def __reactive_stmt():\n"));
                 for stmt in block.iter() {
@@ -593,8 +587,7 @@ impl Transpile for Node {
                     format!(
                         "ReactiveStmt(__reactive_stmt, {})",
                         dependencies.iter().join(", ")
-                    )
-                    .as_str(),
+                    ).as_str()
                 );
                 code
             }
@@ -603,16 +596,10 @@ impl Transpile for Node {
             Break => "break".to_string(),
 
             // * Loop
-            Loop(body) => {
-                format!("while True:\n{}", body.transpile(&transpiler))
-            }
+            Loop(body) => { format!("while True:\n{}", body.transpile(&transpiler)) }
 
             // * For Loop
-            ForLoop {
-                item,
-                iterable,
-                body,
-            } => {
+            ForLoop { item, iterable, body } => {
                 format!(
                     "for {} in {}:\n{}",
                     item.transpile(&transpiler),
@@ -624,7 +611,11 @@ impl Transpile for Node {
             // * While Loop
             // While loop is a loop that repeats the body until the condition is false
             WhileLoop { condition, body } => {
-                format!("while {}:\n{}", condition.transpile(&transpiler), body.transpile(&transpiler))
+                format!(
+                    "while {}:\n{}",
+                    condition.transpile(&transpiler),
+                    body.transpile(&transpiler)
+                )
             }
         }
     }

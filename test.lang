@@ -8,4 +8,7 @@ fn p(x) {
     return x
 } 
 
-res = nums -> p -> double -> p -> triple -> p;
+res = nums 
+-> p 
+-> double 
+-> p

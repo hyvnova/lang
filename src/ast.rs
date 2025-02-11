@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use clap::error;
-
 use crate::error;
 
 
@@ -22,7 +20,7 @@ pub enum Node {
         member: Box<Node>,
     },
 
-    /// Captures Nodeessions inside parenthesis. Ex. ( Node )
+    /// Captures expressions inside parenthesis. Ex. ( Node )
     /// Can be empty. Ex. ()
     Group(Option<Box<Node>>),
 
@@ -50,7 +48,7 @@ pub enum Node {
         index: Box<Node>,
     },
 
-    ///  A sequence of Nodeessions. Serves as a way to group Nodeessions without parenthesis. Sort of like a tuple.
+    ///  A sequence of expressions. Serves as a way to group expressions without parenthesis. Sort of like a tuple.
     /// {Node}, {Node}, ...
     Sequence(Vec<Node>),
 
@@ -96,7 +94,7 @@ pub enum Node {
     Len(Box<Node>),
 
     /// Distribution
-    /// | {sequence} -> {recipients};
+    /// {sequence} -> {recipients};
     Distribution {
         args: Vec<Node>, 
         recipients: Vec<Node>,
@@ -212,8 +210,8 @@ pub enum Node {
 }
 
 
-/// Implementing PartialEq for Node to allow for comparison of Nodeessions.
-/// It only checks for type, not the content of the Nodeessions. 
+/// Implementing PartialEq for Node to allow for comparison of expressions.
+/// It only checks for type, not the content of the expressions. 
 /// Number(1) == Number(2) will return true.
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
@@ -321,6 +319,22 @@ impl AST {
         }
 
         panic!("Signal {} not found", target);
+    }
+
+    /// Pop until non-space node from the current scope.
+    /// All space nodes in between will be popped as well.
+    pub fn pop_until_non_space(&mut self) -> Option<Node> {
+        let mut last = None;
+        while let Some(node) = self.pop_node() {
+            match &node {
+                Node::Empty | Node::Newline => continue,
+                _ => {
+                    last = Some(node);
+                    break;
+                }
+            }
+        }
+        last
     }
 }
 
