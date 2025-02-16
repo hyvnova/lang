@@ -1,8 +1,6 @@
 use core::panic;
 use std::{ fs, path::PathBuf, vec };
 
-use clap::error;
-
 use crate::{
     ast::{ Node, AST },
     error,
@@ -950,6 +948,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                     });
                     continue;
                 }
+
                 HASH => todo!(),
 
                 // * Signal / Reactive Statement
@@ -1036,7 +1035,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // This operation can be chained
                 // {expr} -> {expr} -> {expr}
                 // Ex. names, ages -> zip -> print
-               R_ARROW => {
+                R_ARROW => {
                     // If already parsing a distribution, bail out to avoid conflicts
                     if self.parsing_distribution {
                         self.clean_stop();
@@ -1048,27 +1047,35 @@ impl<'stop_arr> Parser<'stop_arr> {
                     self.parsing_distribution = true;
 
                     // 1) Pop the LHS out of the AST
-                    let lhs_nodes: Vec<Node> = match self.ast.pop_until_non_space().unwrap_or_else(|| {
-                        error!(&self.lexer, "Expected a Node before '->'.")
-                    }) {
+                    let lhs_node = self.ast
+                        .pop_until_non_space()
+                        .unwrap_or_else(|| { error!(&self.lexer, "Expected a Node before '->'.") });
+                    let lhs_nodes = match lhs_node {
+                        Node::Assign { identifiers, values, op } => {
+                            // Instead of wrapping the entire assignment, use its value(s)
+                            values
+                        }
                         Node::WrappedSequence(seq) | Node::Sequence(seq) => seq,
                         node => vec![node],
                     };
 
                     // 2) Parse the first RHS
                     self.skip_newlines();
-                    let rhs_nodes: Vec<Node> = match self
-                        .parse_until(None)
-                        .get_first_or_else(|| error!(&self.lexer, "Expected a Node after '->'.")) 
+                    let rhs_nodes: Vec<Node> = match
+                        self
+                            .parse_until(None)
+                            .get_first_or_else(||
+                                error!(&self.lexer, "Expected a Node after '->'.")
+                            )
                     {
                         Node::WrappedSequence(seq) | Node::Sequence(seq) => seq,
                         node => vec![node],
                     };
 
                     // Build a distribution with the initial LHS, RHS
-                    let mut distribution = Node::Distribution { 
-                        args: lhs_nodes, 
-                        recipients: rhs_nodes 
+                    let mut distribution = Node::Distribution {
+                        args: lhs_nodes,
+                        recipients: rhs_nodes,
                     };
 
                     // 3) While the very next token is another '->', parse additional chained distributions
@@ -1084,9 +1091,12 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                         // parse the next RHS (the new recipients)
                         self.skip_newlines();
-                        let chained_rhs = match self
-                            .parse_until(None)
-                            .get_first_or_else(|| error!(&self.lexer, "Expected a Node after '->'.")) 
+                        let chained_rhs = match
+                            self
+                                .parse_until(None)
+                                .get_first_or_else(||
+                                    error!(&self.lexer, "Expected a Node after '->'.")
+                                )
                         {
                             Node::WrappedSequence(seq) | Node::Sequence(seq) => seq,
                             node => vec![node],

@@ -48,7 +48,7 @@ $ {
     print("Log:", $a, $b) // When a or b changes, this will be executed
 }
 
-// Distribute
+// Distribute 
 // Distribute PI and Coords into the Direction and Distance functions.
 // Same as: res = (Direction(PI, Coords), Distance(PI, Coords))
 res = PI, Coords -> Direction, Distance; 
