@@ -5,7 +5,7 @@
 /// - Separate statement emission from expression formatting.
 /// - Support implicit return in function bodies.
 /// - Keep global builtins imports for runtime behavior.
-use crate::ast::{ Node, AST };
+use crate::ast::{ FunctionParam, FunctionSignature, ImplMethod, Node, StructField, TypeRef, AST };
 use itertools::Itertools;
 use regex::Regex;
 use std::fs;
@@ -102,23 +102,29 @@ impl Transpiler {
             emitter.line("import sys");
             emitter.line(format!("sys.path.append('{}')", BUILTINS_PATH));
 
-            // Iterate over the files in the directory
-            for entry in fs
+            let mut builtin_modules = fs
                 ::read_dir(BUILTINS_PATH)
                 .expect("Failed to read  custom builtin directory")
-            {
-                let entry: fs::DirEntry = entry.expect("Failed to read entry");
-                let path: std::path::PathBuf = entry.path();
+                .filter_map(|entry| {
+                    let entry: fs::DirEntry = entry.ok()?;
+                    let path: std::path::PathBuf = entry.path();
 
-                // Check if it's a  python file and doesn't start
-                if
-                    path.is_file() &&
-                    path.extension().unwrap_or_default() == "py" &&
-                    !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
-                {
-                    // Include the file
-                    emitter.line(format!("from {} import * ", path.file_stem().unwrap().to_str().unwrap()));
-                }
+                    if
+                        path.is_file() &&
+                        path.extension().unwrap_or_default() == "py" &&
+                        !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+                    {
+                        return Some(path.file_stem().unwrap().to_str().unwrap().to_string());
+                    }
+
+                    None
+                })
+                .collect::<Vec<String>>();
+            builtin_modules.sort();
+
+            // Iterate over the files in a deterministic order.
+            for module in builtin_modules {
+                emitter.line(format!("from {} import * ", module));
             }
 
             emitter.line("# End of custom builtins");
@@ -181,6 +187,18 @@ impl Transpiler {
                     Block(nodes) => self.emit_block(em, nodes),
                     other => self.emit_stmt(em, other),
                 });
+            }
+
+            StructDef { name, generics, fields } => {
+                self.emit_struct_def(emitter, name, generics, fields);
+            }
+
+            TraitDef { name, generics, methods } => {
+                self.emit_trait_def(emitter, name, generics, methods);
+            }
+
+            ImplBlock { generics, trait_ref, target, methods } => {
+                self.emit_impl_block(emitter, generics, trait_ref.as_ref(), target, methods);
             }
 
             Conditional { condition, body, elifs, else_body } => {
@@ -433,6 +451,15 @@ impl Transpiler {
 
             Distribution { args, recipients } => self.emit_distribution_expr(emitter, args, recipients),
 
+            StructInit { name, fields } => {
+                let args = fields
+                    .iter()
+                    .map(|(field, value)| format!("{}={}", field, self.emit_expr(emitter, value)))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("{}({})", self.emit_type_name(name), args)
+            }
+
             other => panic!("Node {:?} is not an expression", other),
         }
     }
@@ -563,6 +590,217 @@ impl Transpiler {
         code
     }
 
+    fn emit_struct_def(
+        &self,
+        emitter: &mut PyEmitter,
+        name: &str,
+        generics: &[String],
+        fields: &[StructField]
+    ) {
+        emitter.line(format!("class {}:", name));
+        emitter.indented(|em| {
+            em.line(format!("__lang_generics__ = {}", self.emit_string_list(generics)));
+            em.line(format!(
+                "__lang_field_types__ = {}",
+                self.emit_field_type_map(fields, generics)
+            ));
+
+            let args = fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<&str>>()
+                .join(", ");
+            let signature = if args.is_empty() {
+                "__init__(self)".to_string()
+            } else {
+                format!("__init__(self, {})", args)
+            };
+
+            em.line(format!("def {}:", signature));
+            em.indented(|body| {
+                if fields.is_empty() {
+                    body.line("pass");
+                    return;
+                }
+
+                let values = fields
+                    .iter()
+                    .map(|field| format!("'{}': {}", field.name, field.name))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+
+                body.line(format!(
+                    "__lang_check_struct_fields__('{}', self.__lang_field_types__, {{{}}})",
+                    name,
+                    values
+                ));
+
+                for field in fields.iter() {
+                    body.line(format!("self.{0} = {0}", field.name));
+                }
+            });
+        });
+    }
+
+    fn emit_trait_def(
+        &self,
+        emitter: &mut PyEmitter,
+        name: &str,
+        generics: &[String],
+        methods: &[FunctionSignature]
+    ) {
+        let method_names = methods
+            .iter()
+            .map(|method| method.name.clone())
+            .collect::<Vec<String>>();
+
+        emitter.line(format!(
+            "__lang_register_trait__('{}', {}, {})",
+            name,
+            self.emit_string_list(generics),
+            self.emit_string_list(&method_names)
+        ));
+    }
+
+    fn emit_impl_block(
+        &self,
+        emitter: &mut PyEmitter,
+        generics: &[String],
+        trait_ref: Option<&TypeRef>,
+        target: &TypeRef,
+        methods: &[ImplMethod]
+    ) {
+        let target_name = self.emit_type_name(target);
+
+        for method in methods.iter() {
+            let function_name = format!("__lang_impl_{}_{}", target.name, method.signature.name);
+            self.emit_impl_method(emitter, &function_name, &target_name, generics, method);
+            emitter.line(format!("{}.{} = {}", target_name, method.signature.name, function_name));
+        }
+
+        if let Some(trait_ref) = trait_ref {
+            let method_names = methods
+                .iter()
+                .map(|method| method.signature.name.clone())
+                .collect::<Vec<String>>();
+
+            emitter.line(format!(
+                "__lang_register_impl__('{}', {}, {})",
+                self.emit_type_name(trait_ref),
+                target_name,
+                self.emit_string_list(&method_names)
+            ));
+        }
+    }
+
+    fn emit_impl_method(
+        &self,
+        emitter: &mut PyEmitter,
+        function_name: &str,
+        target_name: &str,
+        generics: &[String],
+        method: &ImplMethod
+    ) {
+        let params = method
+            .signature
+            .params
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ");
+        emitter.line(format!("def {}({}):", function_name, params));
+
+        emitter.indented(|em| {
+            let arg_types = self.emit_param_type_map(&method.signature.params, generics);
+            let arg_values = method
+                .signature
+                .params
+                .iter()
+                .filter(|param| param.name != "self")
+                .map(|param| format!("'{}': {}", param.name, param.name))
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            if arg_types != "{}" {
+                em.line(format!(
+                    "__lang_check_args__('{}.{}', {}, {{{}}})",
+                    target_name,
+                    method.signature.name,
+                    arg_types,
+                    arg_values
+                ));
+            }
+
+            match method.body.as_ref() {
+                Node::FnBody(nodes) => self.emit_fn_body(em, &nodes),
+                Node::Block(nodes) => self.emit_block(em, &nodes),
+                other => self.emit_stmt(em, other),
+            }
+        });
+    }
+
+    fn emit_field_type_map(&self, fields: &[StructField], generics: &[String]) -> String {
+        let entries = fields
+            .iter()
+            .map(|field| {
+                format!(
+                    "'{}': {}",
+                    field.name,
+                    self.emit_type_check_expr(&field.type_ref, generics)
+                )
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!("{{{}}}", entries)
+    }
+
+    fn emit_param_type_map(&self, params: &[FunctionParam], generics: &[String]) -> String {
+        let entries = params
+            .iter()
+            .filter(|param| param.name != "self")
+            .filter_map(|param| {
+                let type_ref = param.type_ref.as_ref()?;
+                Some(format!(
+                    "'{}': {}",
+                    param.name,
+                    self.emit_type_check_expr(type_ref, generics)
+                ))
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!("{{{}}}", entries)
+    }
+
+    fn emit_type_check_expr(&self, type_ref: &TypeRef, generics: &[String]) -> String {
+        if generics.contains(&type_ref.name) {
+            return "None".to_string();
+        }
+
+        match type_ref.name.as_str() {
+            "str" | "int" | "float" | "bool" | "list" | "dict" | "tuple" | "set" | "object" =>
+                type_ref.name.clone(),
+            "String" => "str".to_string(),
+            "Self" => "None".to_string(),
+            _ => type_ref.name.clone(),
+        }
+    }
+
+    fn emit_type_name(&self, type_ref: &TypeRef) -> String {
+        type_ref.name.clone()
+    }
+
+    fn emit_string_list(&self, values: &[String]) -> String {
+        let values = values
+            .iter()
+            .map(|value| format!("'{}'", value))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!("[{}]", values)
+    }
+
     /// Build a signal definition assignment.
     fn emit_signal_def(
         &self,
@@ -641,6 +879,7 @@ impl Transpiler {
                 | Node::Len(_)
                 | Node::Lambda { .. }
                 | Node::Signal(_)
+                | Node::StructInit { .. }
         )
     }
 }

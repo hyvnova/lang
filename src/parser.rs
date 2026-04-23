@@ -2,7 +2,7 @@ use core::panic;
 use std::{ fs, path::PathBuf, vec };
 
 use crate::{
-    ast::{ Node, AST },
+    ast::{ FunctionParam, FunctionSignature, ImplMethod, Node, StructField, TypeRef, AST },
     error,
     lexer::{ Kind, Lexer, Token },
     log,
@@ -31,6 +31,7 @@ const RANGE_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind:
 const RANGE_END_OR_L_BRACKET: &[Kind] = &[Kind::L_BRACKET, Kind::R_ARROW];
 const RANGE_END_OR_R_PARENT: &[Kind] = &[Kind::R_PARENT, Kind::R_ARROW];
 const RANGE_END_OR_R_SQUARE_BRACKET: &[Kind] = &[Kind::R_SQUARE_BRACKET, Kind::R_ARROW];
+const FIELD_VALUE_END: &[Kind] = &[Kind::COMMA, Kind::R_BRACKET, Kind::NEW_LINE, Kind::SEMICOLON];
 
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
@@ -438,9 +439,21 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
 
-                STRUCT => error!(&self.lexer, "Struct definitions are not supported yet."),
-                TRAIT => error!(&self.lexer, "Trait definitions are not supported yet."),
-                IMPL => error!(&self.lexer, "Impl blocks are not supported yet."),
+                STRUCT => {
+                    let node = self.parse_struct_def();
+                    self.ast.add_node(node);
+                    continue;
+                }
+                TRAIT => {
+                    let node = self.parse_trait_def();
+                    self.ast.add_node(node);
+                    continue;
+                }
+                IMPL => {
+                    let node = self.parse_impl_block();
+                    self.ast.add_node(node);
+                    continue;
+                }
 
                 RETURN => {
                     let expr: Node = self
@@ -776,6 +789,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                 L_BRACKET => {
                     log!("Parsing BLOCK");
 
+                    if let Some(init_name) = self.pop_struct_init_name() {
+                        let init = self.parse_struct_init(init_name);
+                        self.ast.add_node(init);
+                        continue;
+                    }
+
                     // ! This is technically the right way to do it, but... parse_until it's working fine...
                     // ! Needs to be a global stop so it is impossible to skip the stop token "}" by mistake
                     // ! Since a block will have a bunch of different stops
@@ -1102,7 +1121,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         .pop_until_non_space()
                         .unwrap_or_else(|| { error!(&self.lexer, "Expected a Node before '->'.") });
                     let lhs_nodes = match lhs_node {
-                        Node::Assign { identifiers, values, op } => {
+                        Node::Assign { values, .. } => {
                             // Instead of wrapping the entire assignment, use its value(s)
                             values
                         }
@@ -1310,6 +1329,25 @@ impl<'stop_arr> Parser<'stop_arr> {
                 args: bi!(Self::normalize_node(*args)),
                 body: bi!(Self::normalize_node(*body)),
             },
+            Node::ImplBlock { generics, trait_ref, target, methods } => Node::ImplBlock {
+                generics,
+                trait_ref,
+                target,
+                methods: methods
+                    .into_iter()
+                    .map(|method| ImplMethod {
+                        signature: method.signature,
+                        body: bi!(Self::normalize_node(*method.body)),
+                    })
+                    .collect(),
+            },
+            Node::StructInit { name, fields } => Node::StructInit {
+                name,
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| (name, Self::normalize_node(value)))
+                    .collect(),
+            },
             Node::ReactiveStmt { block, dependencies } => Node::ReactiveStmt {
                 block: Self::normalize_scope(block),
                 dependencies,
@@ -1373,6 +1411,296 @@ impl<'stop_arr> Parser<'stop_arr> {
             "*" | "/" | "%" => 8,
             "**" => 9,
             _ => 0,
+        }
+    }
+
+    fn parse_struct_def(&mut self) -> Node {
+        let name = self.parse_identifier_name("Expected a struct name after \"struct\".");
+        let generics = self.parse_generic_names();
+
+        self.expect_token(Kind::L_BRACKET, "Expected a struct body after struct name.");
+
+        let mut fields = Vec::new();
+        loop {
+            self.skip_newlines();
+
+            if self.peek_token().is(Kind::R_BRACKET) {
+                self.next_token();
+                break;
+            }
+
+            let field_name = self.parse_identifier_name("Expected a field name in struct body.");
+            self.expect_token(Kind::COLON, "Expected ':' after struct field name.");
+            let type_ref = self.parse_type_ref();
+            fields.push(StructField { name: field_name, type_ref });
+
+            self.consume_decl_separator();
+        }
+
+        Node::StructDef { name, generics, fields }
+    }
+
+    fn parse_trait_def(&mut self) -> Node {
+        let name = self.parse_identifier_name("Expected a trait name after \"trait\".");
+        let generics = self.parse_generic_names();
+
+        self.expect_token(Kind::L_BRACKET, "Expected a trait body after trait name.");
+
+        let mut methods = Vec::new();
+        loop {
+            self.skip_newlines();
+
+            if self.peek_token().is(Kind::R_BRACKET) {
+                self.next_token();
+                break;
+            }
+
+            self.expect_token(Kind::FN_DEF, "Expected a trait method signature.");
+            methods.push(self.parse_function_signature());
+            self.consume_decl_separator();
+        }
+
+        Node::TraitDef { name, generics, methods }
+    }
+
+    fn parse_impl_block(&mut self) -> Node {
+        let generics = self.parse_generic_names();
+        let first_type = self.parse_type_ref();
+
+        let (trait_ref, target) = if self.peek_token().is(Kind::FOR) {
+            self.next_token();
+            (Some(first_type), self.parse_type_ref())
+        } else {
+            (None, first_type)
+        };
+
+        self.expect_token(Kind::L_BRACKET, "Expected an impl body.");
+
+        let mut methods = Vec::new();
+        loop {
+            self.skip_newlines();
+
+            if self.peek_token().is(Kind::R_BRACKET) {
+                self.next_token();
+                break;
+            }
+
+            self.expect_token(Kind::FN_DEF, "Expected a method definition in impl body.");
+            let signature = self.parse_function_signature();
+            self.expect_token(Kind::L_BRACKET, "Expected a method body after method signature.");
+            let body = self.parse_block(true);
+            methods.push(ImplMethod { signature, body: bi!(body) });
+
+            self.consume_decl_separator();
+        }
+
+        Node::ImplBlock { generics, trait_ref, target, methods }
+    }
+
+    fn parse_struct_init(&mut self, name: TypeRef) -> Node {
+        let mut fields = Vec::new();
+
+        loop {
+            self.skip_newlines();
+
+            if self.peek_token().is(Kind::R_BRACKET) {
+                self.next_token();
+                break;
+            }
+
+            let field_name = self.parse_identifier_name("Expected a field name in struct literal.");
+            self.expect_token(Kind::COLON, "Expected ':' after struct literal field name.");
+
+            let value = self
+                .parse_until(Some(FIELD_VALUE_END))
+                .get_first_or_else(|| {
+                    error!(&self.lexer, "Expected a value after struct literal field ':'.")
+                });
+            self.clean_stop();
+
+            fields.push((field_name, value));
+
+            match self.peek_token() {
+                Some(Token { kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE, .. }) => {
+                    self.next_token();
+                }
+                Some(Token { kind: Kind::R_BRACKET, .. }) => {
+                    self.next_token();
+                    break;
+                }
+                Some(other) =>
+                    error!(
+                        &self.lexer,
+                        format!("Expected ',' or '}}' after struct literal field. Got: {:?}", other)
+                    ),
+                None => error!(&self.lexer, "Expected closing '}' for struct literal."),
+            }
+        }
+
+        Node::StructInit { name, fields }
+    }
+
+    fn parse_function_signature(&mut self) -> FunctionSignature {
+        let name = self.parse_identifier_name("Expected a function or method name.");
+        let params = self.parse_function_params();
+        let return_type = if self.peek_token().is(Kind::R_ARROW) {
+            self.next_token();
+            Some(self.parse_type_ref())
+        } else {
+            None
+        };
+
+        FunctionSignature { name, params, return_type }
+    }
+
+    fn parse_function_params(&mut self) -> Vec<FunctionParam> {
+        self.expect_token(Kind::L_PARENT, "Expected '(' after function or method name.");
+
+        let mut params = Vec::new();
+        loop {
+            self.skip_newlines();
+
+            if self.peek_token().is(Kind::R_PARENT) {
+                self.next_token();
+                break;
+            }
+
+            let name = self.parse_identifier_name("Expected a parameter name.");
+            let type_ref = if self.peek_token().is(Kind::COLON) {
+                self.next_token();
+                Some(self.parse_type_ref())
+            } else {
+                None
+            };
+
+            params.push(FunctionParam { name, type_ref });
+
+            match self.peek_token() {
+                Some(Token { kind: Kind::COMMA, .. }) => {
+                    self.next_token();
+                }
+                Some(Token { kind: Kind::R_PARENT, .. }) => {
+                    self.next_token();
+                    break;
+                }
+                Some(other) =>
+                    error!(
+                        &self.lexer,
+                        format!("Expected ',' or ')' after parameter. Got: {:?}", other)
+                    ),
+                None => error!(&self.lexer, "Expected ')' after parameters."),
+            }
+        }
+
+        params
+    }
+
+    fn parse_type_ref(&mut self) -> TypeRef {
+        let name = self.parse_identifier_name("Expected a type name.");
+        let generics = if self.peek_token().is(Kind::LT) {
+            self.next_token();
+            let mut generics = Vec::new();
+
+            loop {
+                generics.push(self.parse_type_ref());
+
+                match self.peek_token() {
+                    Some(Token { kind: Kind::COMMA, .. }) => {
+                        self.next_token();
+                    }
+                    Some(Token { kind: Kind::GT, .. }) => {
+                        self.next_token();
+                        break;
+                    }
+                    Some(other) =>
+                        error!(
+                            &self.lexer,
+                            format!("Expected ',' or '>' in generic type arguments. Got: {:?}", other)
+                        ),
+                    None => error!(&self.lexer, "Expected '>' after generic type arguments."),
+                }
+            }
+
+            generics
+        } else {
+            Vec::new()
+        };
+
+        TypeRef::new(name, generics)
+    }
+
+    fn parse_generic_names(&mut self) -> Vec<String> {
+        if self.peek_token().is_not(Kind::LT) {
+            return Vec::new();
+        }
+
+        self.next_token();
+        let mut generics = Vec::new();
+
+        loop {
+            generics.push(self.parse_identifier_name("Expected a generic parameter name."));
+
+            match self.peek_token() {
+                Some(Token { kind: Kind::COMMA, .. }) => {
+                    self.next_token();
+                }
+                Some(Token { kind: Kind::GT, .. }) => {
+                    self.next_token();
+                    break;
+                }
+                Some(other) =>
+                    error!(
+                        &self.lexer,
+                        format!("Expected ',' or '>' in generic parameter list. Got: {:?}", other)
+                    ),
+                None => error!(&self.lexer, "Expected '>' after generic parameter list."),
+            }
+        }
+
+        generics
+    }
+
+    fn parse_identifier_name(&mut self, message: &str) -> String {
+        match self.next_token() {
+            Some(Token { kind: Kind::IDENTIFIER, value, .. }) => value,
+            Some(other) => error!(&self.lexer, format!("{} Got: {:?}", message, other)),
+            None => error!(&self.lexer, message),
+        }
+    }
+
+    fn expect_token(&mut self, kind: Kind, message: &str) {
+        if self.next_token().is_not(kind) {
+            error!(&self.lexer, message);
+        }
+    }
+
+    fn consume_decl_separator(&mut self) {
+        loop {
+            match self.peek_token() {
+                Some(Token { kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE, .. }) => {
+                    self.next_token();
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn pop_struct_init_name(&mut self) -> Option<TypeRef> {
+        let node = self.ast.current_scope().last()?;
+
+        match node {
+            Node::Identifier(_) => {
+                let node = self.ast.pop_node()?;
+                Self::type_ref_from_node(node)
+            }
+            _ => None,
+        }
+    }
+
+    fn type_ref_from_node(node: Node) -> Option<TypeRef> {
+        match node {
+            Node::Identifier(name) => Some(TypeRef::new(name, Vec::new())),
+            _ => None,
         }
     }
 }

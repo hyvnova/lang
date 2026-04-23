@@ -1,5 +1,42 @@
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeRef {
+    pub name: String,
+    pub generics: Vec<TypeRef>,
+}
+
+impl TypeRef {
+    pub fn new(name: String, generics: Vec<TypeRef>) -> Self {
+        TypeRef { name, generics }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub type_ref: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionParam {
+    pub name: String,
+    pub type_ref: Option<TypeRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSignature {
+    pub name: String,
+    pub params: Vec<FunctionParam>,
+    pub return_type: Option<TypeRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplMethod {
+    pub signature: FunctionSignature,
+    pub body: Box<Node>,
+}
+
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -178,6 +215,38 @@ pub enum Node {
         body: Box<Node>
     },
 
+    /// Rust-like struct declaration.
+    /// Transpiles to a Python class with checked constructor fields.
+    StructDef {
+        name: String,
+        generics: Vec<String>,
+        fields: Vec<StructField>,
+    },
+
+    /// Rust-like trait declaration.
+    /// Transpiles to runtime trait metadata.
+    TraitDef {
+        name: String,
+        generics: Vec<String>,
+        methods: Vec<FunctionSignature>,
+    },
+
+    /// Rust-like implementation block.
+    /// `trait_ref` is `None` for inherent impls and `Some(_)` for trait impls.
+    ImplBlock {
+        generics: Vec<String>,
+        trait_ref: Option<TypeRef>,
+        target: TypeRef,
+        methods: Vec<ImplMethod>,
+    },
+
+    /// Rust-like struct literal.
+    /// Example: `User { name: "Ada", age: 36 }`.
+    StructInit {
+        name: TypeRef,
+        fields: Vec<(String, Node)>,
+    },
+
     /// Represents a reactive statement.
     /// A block of code that will be re-executed when any of the dependencies change.
     ReactiveStmt{
@@ -244,6 +313,10 @@ impl PartialEq for Node {
             | (Conditional { .. }, Conditional { .. })
             | (Assign { .. }, Assign { .. })
             | (FunctionDef { .. }, FunctionDef { .. })
+            | (StructDef { .. }, StructDef { .. })
+            | (TraitDef { .. }, TraitDef { .. })
+            | (ImplBlock { .. }, ImplBlock { .. })
+            | (StructInit { .. }, StructInit { .. })
             | (Python(_), Python(_))
             | (SignalDef { .. }, SignalDef { .. })
             | (SignalUpdate { .. }, SignalUpdate { .. })
