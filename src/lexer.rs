@@ -14,6 +14,9 @@ pub enum Kind {
     // Statement
     //   Instructions
     FN_DEF,    // fn - function definition 
+    STRUCT,    // struct - data structure definition
+    TRAIT,     // trait - behavior contract definition
+    IMPL,      // impl - implementation block
 
     LOOP,     // loop
     FOR,      // for
@@ -135,6 +138,9 @@ const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
 
     // Function definition
     "fn" => Kind::FN_DEF,
+    "struct" => Kind::STRUCT,
+    "trait" => Kind::TRAIT,
+    "impl" => Kind::IMPL,
 
     // Boolean literals
     "true" => Kind::TRUE,

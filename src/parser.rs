@@ -428,6 +428,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
 
+                STRUCT => error!(&self.lexer, "Struct definitions are not supported yet."),
+                TRAIT => error!(&self.lexer, "Trait definitions are not supported yet."),
+                IMPL => error!(&self.lexer, "Impl blocks are not supported yet."),
+
                 RETURN => {
                     let expr: Node = self
                         .parse_until(Some(current_stop))
