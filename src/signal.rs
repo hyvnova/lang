@@ -13,8 +13,10 @@ pub fn clean_signals(ast: &AST, signals: HashSet<String>) -> HashSet<String> {
             if sx == sy { continue; }
 
             // If covered by other signal -> remove
-            if ast.find_signal_deps(sx).contains(sy) {
-                return false;
+            if let Some(deps) = ast.find_signal_deps(sx) {
+                if deps.contains(sy) {
+                    return false;
+                }
             }
         }
         // If not covered -> keep

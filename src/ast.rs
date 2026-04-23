@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use crate::error;
-
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -259,7 +257,7 @@ impl PartialEq for Node {
 pub struct AST {
     // Vector of Scopes
     // A scope is a vector of nodes
-    pub scope: Vec<Vec<Node>>
+    pub scopes: Vec<Vec<Node>>
 }
 
 impl AST {
@@ -267,50 +265,49 @@ impl AST {
         let childrem = Vec::new();
         
         AST {
-            scope: vec![childrem],
+            scopes: vec![childrem],
         }
     }
 
     /// Create a new scope, which will be the current scope.
     pub fn new_scope(&mut self) {
-        self.scope.push(Vec::new());
+        self.scopes.push(Vec::new());
     }
 
     /// Pop the current scope.
     pub fn pop_scope(&mut self) -> Option<Vec<Node>> {
-        self.scope.pop()
+        self.scopes.pop()
     }
 
     /// Returns a reference to the current scope.
     pub fn current_scope(&self) -> &Vec<Node> {
-        self.scope.last().unwrap()
+        self.scopes.last().unwrap()
     }
     
     /// Return a copy of the current scope.
     pub fn get_scope(&self) -> Vec<Node> {
-        self.scope.last().unwrap_or_else(|| panic!("No scope found")).clone()
+        self.scopes.last().unwrap_or_else(|| panic!("No scope found")).clone()
     }
 
     /// Add a new node to the current scope.
     pub fn add_node(&mut self, node: Node) {
-        self.scope.last_mut().unwrap_or_else(|| panic!("Can't add node -No scope found")).push(node);
+        self.scopes.last_mut().unwrap_or_else(|| panic!("Can't add node -No scope found")).push(node);
     }
 
     /// Perform a pop operation on the current scope. 
     pub fn pop_node(&mut self) -> Option<Node> {
-        self.scope.last_mut()?.pop()
+        self.scopes.last_mut()?.pop()
     }
 
 
-    /// Finds a Signal's dependencies given it's name
-    /// This asumes that the signal exists..
-    pub fn find_signal_deps(&self, target: &str) -> HashSet<String> {
-        for scope in &self.scope {
+    /// Finds a Signal's dependencies given it's name.
+    pub fn find_signal_deps(&self, target: &str) -> Option<HashSet<String>> {
+        for scope in &self.scopes {
             for node in scope {
                 match node {
                     Node::SignalDef {name, dependencies, .. } => {
                         if target == name {
-                            return dependencies.clone();           
+                            return Some(dependencies.clone());
                         }
                     }
                     _ => {}
@@ -318,7 +315,7 @@ impl AST {
             }
         }
 
-        panic!("Signal {} not found", target);
+        None
     }
 
     /// Pop until non-space node from the current scope.
@@ -335,6 +332,26 @@ impl AST {
             }
         }
         last
+    }
+    
+    // Pop's last node in scope
+    // If capturing sequence then scope will be turned into a sequence node and the scope will be poped
+    pub fn solve_pop(&mut self, parsing_sequence: bool) -> Option<Node> {
+        if parsing_sequence {
+            let sequence = Node::Sequence(self.get_scope());
+            
+            // If only 1 scope then, just clear it out because it's main scope, if poped, big trouble :D
+            dbg!(&self.scopes);
+            if self.scopes.len() == 1 {
+                self.scopes.get_mut(0).unwrap().clear();
+            } else {
+                // Scope should be poped but for some reason that breaks things, so, fuck it.
+                self.scopes.last_mut().unwrap().clear();
+            }
+            
+            return Some(sequence);
+        }
+        return self.pop_node();
     }
 }
 

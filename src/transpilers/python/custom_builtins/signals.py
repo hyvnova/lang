@@ -18,10 +18,14 @@ Output: 2, 3
 """
 
 
+import warnings
 from typing import Iterable, List, Self, Set
 
 
 class Signal:
+    _active_stack: List["Signal"] = []
+    _cycle_warned: Set["Signal"] = set()
+
     def __init__(self, callback, *deps):
         self.listeners: Set[Signal] = set()
         self.update(callback, *deps)
@@ -46,9 +50,24 @@ class Signal:
         """
         Call when a signal being listened to changes
         """
-        self.value = self.callback(self)
-        for listener in self.listeners:
-            listener()
+        if self in Signal._active_stack and self not in Signal._cycle_warned:
+            warnings.warn(
+                "Signal cycle detected; this may recurse indefinitely and hit RecursionError. "
+                "If this is intentional, use an explicit loop to make it obvious.",
+                RuntimeWarning,
+                stacklevel=2
+            )
+            Signal._cycle_warned.add(self)
+
+        Signal._active_stack.append(self)
+        try:
+            self.value = self.callback(self)
+            for listener in self.listeners:
+                listener()
+        finally:
+            Signal._active_stack.pop()
+            if not Signal._active_stack:
+                Signal._cycle_warned.clear()
 
     def __str__(self):
         return str(self.value)

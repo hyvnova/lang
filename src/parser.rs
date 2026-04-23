@@ -24,6 +24,8 @@ macro_rules! bi {
 /// By default, the parser will stop at a semicolon or a new line.
 /// This is probably bad for performance, but I really can't care less
 const EXPR_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE];
+/// Like EXPR_END, but allows finishing an expression at the end of a block.
+const EXPR_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_BRACKET];
 
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
@@ -66,6 +68,10 @@ pub struct Parser<'stop_arr> {
     // And instead the following distribution is considered takes the previous distribution as input
     // All this is supposed to allow nested distributions
     parsing_distribution: bool,
+
+    // When true, prefer EXPR_END even if a block stop is active.
+    // This prevents expressions (like RHS) from consuming the entire block.
+    prefer_expr_end: bool,
 }
 
 impl<'stop_arr> Parser<'stop_arr> {
@@ -88,6 +94,7 @@ impl<'stop_arr> Parser<'stop_arr> {
             defined_signals: HashSet::new(),
 
             parsing_distribution: false,
+            prefer_expr_end: false,
         }
     }
 
@@ -142,6 +149,11 @@ impl<'stop_arr> Parser<'stop_arr> {
     fn parse_until(&mut self, stop_at: Option<&'stop_arr [Kind]>) -> Vec<Node> {
         log!("+ PARSE UNTIL", "Stopping at: {:?}", stop_at);
 
+        let prev_prefer_expr_end: bool = self.prefer_expr_end;
+        if stop_at.is_none() {
+            self.prefer_expr_end = true;
+        }
+
         if let Some(stop_at) = stop_at {
             self.stops.push(stop_at);
         }
@@ -153,6 +165,8 @@ impl<'stop_arr> Parser<'stop_arr> {
 
         self.ast.new_scope();
         self.parse_node();
+
+        self.prefer_expr_end = prev_prefer_expr_end;
 
         if stop_at == None && stops_at_count != self.stopped_at.len() {
             self.stopped_at.pop();
@@ -313,6 +327,11 @@ impl<'stop_arr> Parser<'stop_arr> {
             // Used to make all handlers stop where they're supposed to
             // In other words, if a handler sets a stop this will make sure that the parser stops at that token
             let current_stop: &[Kind] = match self.stops.last() {
+                Some(stop)
+                    if self.prefer_expr_end && stop.len() == 1 && stop[0] == Kind::R_BRACKET =>
+                {
+                    EXPR_END_OR_R_BRACKET
+                }
                 Some(stop) => *stop,
                 None => EXPR_END,
             };
@@ -364,6 +383,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 // Ex. `def add(a, b) { return a + b; }`
                 // |   `def add(a, b) { a + b }`
                 FN_DEF => {
+
                     // parse function name
                     let ident_scope: Node = self
                         .parse_until(Some(&[L_PARENT]))
@@ -374,6 +394,8 @@ impl<'stop_arr> Parser<'stop_arr> {
                     if self.next_token().is_not(Kind::L_PARENT) {
                         error!(&self.lexer, "Expected a parenthesis after function name.");
                     }
+
+                    log!("FN_DEF", "Ident Scope: {:?}", ident_scope);
 
                     self.clean_stop(); // Remove L_PARENT stop
 
@@ -610,7 +632,7 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                     let op: String = token.value.clone(); // Assignment operator. Ex. `=`, `+=`, `*=`, ...
 
-                    let lhs: Node = self.ast.pop_node().unwrap_or_else(|| {
+                    let lhs: Node = self.ast.solve_pop(self.capturing_sequence).unwrap_or_else(|| {
                         error!(
                             &self.lexer,
                             "No LHS found. Probably node was popped by another handler."
@@ -823,9 +845,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
 
                 // Don't even know what to do with these
-                SINGLE_QUOTE => todo!(),
-                DOUBLE_QUOTE => todo!(),
-                BACK_TICK => todo!(),
+                SINGLE_QUOTE =>
+                    error!(&self.lexer, "Unexpected quote token. Did you mean a string literal?"),
+                DOUBLE_QUOTE =>
+                    error!(&self.lexer, "Unexpected quote token. Did you mean a string literal?"),
+                BACK_TICK =>
+                    error!(&self.lexer, "Unexpected backtick. Raw strings are not supported."),
 
                 // * Unary Operators / Bitwise
                 // {op}{Node}
@@ -859,9 +884,9 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
 
                 // * Decorators
-                AT => todo!(),
+                AT => error!(&self.lexer, "Decorators are not supported yet."),
 
-                COLON => todo!(),
+                COLON => error!(&self.lexer, "Unexpected ':'."),
 
                 COMMA => {
                     if self.capturing_sequence {
@@ -909,12 +934,18 @@ impl<'stop_arr> Parser<'stop_arr> {
                         Node::Empty
                     });
 
-                    if
-                        self.stopped_at.is_empty() ||
-                        !current_stop.contains(&self.stopped_at.pop().unwrap())
-                    {
-                        error!(&self.lexer, "Expected a closing token for range.");
-                    }
+                    // * Shouldn't be reacheable, since parse_until will only stop where it is supposed to
+                    // * Or throw an error, this will always be executed becuase if parse_until it's successfull
+                    // * stopped_at will be empty, meaning parse_until found it's stop and also popped it
+                    // if
+                    //     self.stopped_at.is_empty() ||
+                    //     !current_stop.contains(&self.stopped_at.pop().unwrap())
+                    // {
+                    //     // Debug stop at and current stop at
+                    //     dbg!("RANGE", "Stopped at: {:?}, Current Stop: {:?}", &self.stopped_at, &current_stop);
+
+                    //     error!(&self.lexer, "Expected a closing token for range.");
+                    // }
 
                     self.clean_stop(); // Remove stop token
 
@@ -949,7 +980,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
 
-                HASH => todo!(),
+                HASH => error!(
+                    &self.lexer,
+                    "Unexpected '#'. Use #[python] ... #[endpython] for raw Python blocks."
+                ),
 
                 // * Signal / Reactive Statement
                 // signal: ${ident}
@@ -1023,9 +1057,9 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
 
-                PIPE_RIGHT => todo!(),
-                PIPE_LEFT => todo!(),
-                L_ARROW => todo!(),
+                PIPE_RIGHT => error!(&self.lexer, "Pipe operators are not supported yet."),
+                PIPE_LEFT => error!(&self.lexer, "Pipe operators are not supported yet."),
+                L_ARROW => error!(&self.lexer, "Left arrow '<-' is not supported yet."),
 
                 // * Foward to / Distribution / Pipe
                 // Sintactic Sugar that uses the value on the left and passes it as an argument to the function on the right
@@ -1052,6 +1086,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         .unwrap_or_else(|| { error!(&self.lexer, "Expected a Node before '->'.") });
                     let lhs_nodes = match lhs_node {
                         Node::Assign { identifiers, values, op } => {
+                            dbg!("Assingmentin in distribution");
                             // Instead of wrapping the entire assignment, use its value(s)
                             values
                         }

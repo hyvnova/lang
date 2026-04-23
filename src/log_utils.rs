@@ -16,7 +16,8 @@ pub fn log_error(lexer: &Lexer, lines: &[String]) -> ! {
     // Determine the maximum width
     let max_error_width = lines.iter().map(|s| s.len()).max().unwrap_or(50);
     let source_line_width = lexer.source.lines().map(|s| s.len()).max().unwrap_or(0);
-    let indicator_width = lexer.column;
+    let column = lexer.current_column();
+    let indicator_width = column;
     let width = max_error_width.max(source_line_width + indicator_width + 20);
 
     // Red text for the "Error" header
@@ -30,7 +31,6 @@ pub fn log_error(lexer: &Lexer, lines: &[String]) -> ! {
     }
 
     let line = lexer.line;
-    let column = lexer.column;
     let source = &lexer.source;
 
     // Display line and column information
@@ -104,8 +104,7 @@ macro_rules! log {
 #[cfg(not(debug_assertions))]
 #[macro_export]
 macro_rules! log {
-    ($label:Node) => {};
-    ($label:Node, $($arg:tt)*) => {};
+    ($($arg:tt)*) => {};
 }
 
 
@@ -131,5 +130,5 @@ pub fn dbg_current_line(lexer: &Lexer) {
     let line = lexer.source.lines().nth(lexer.line - 1).unwrap_or("! No line found !");
 
     println!("{}", line);
-    println!("{}", "^".repeat(lexer.column));
+    println!("{}", "^".repeat(lexer.current_column()));
 }

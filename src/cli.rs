@@ -71,9 +71,11 @@ fn run_lang(mut parser: LangParser, transpiler: String) {
 
     // * Execute code
     // TODO: Add support for other languages, for now I won't bother.
-    std::process::Command::new("py")
+    let status = std::process::Command::new("py")
         .arg("-c")
         .arg(&code)
-        .spawn()
+        .status()
         .expect("failed to execute process");
+
+    std::process::exit(status.code().unwrap_or(1));
 }

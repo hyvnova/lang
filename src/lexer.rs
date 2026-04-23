@@ -219,8 +219,22 @@ impl Lexer {
             kind: raw,
             value: self.current_token_value.take().unwrap(),
             line: self.line,
-            column: self.current_char_index,
+            column: self.column,
         });
+    }
+
+    /// Returns the current column index based on the source and cursor position.
+    /// This is useful for error reporting when internal column tracking drifts.
+    pub fn current_column(&self) -> usize {
+        let mut column = 0;
+        for ch in self.source.chars().take(self.current_char_index) {
+            if ch == '\n' {
+                column = 0;
+            } else {
+                column += 1;
+            }
+        }
+        column
     }
 
     fn next_raw_token(&mut self) -> Kind {

@@ -12,11 +12,6 @@ quote = "1.0.36"
 rand = "0.8.5"
 regex = "1.11.1"
 
-[build]
-rustflags = ["-Z", "threads=8"]
-rustc-wrapper = "C:\\Users\\theyu\\scoop\\apps\\sccache\\0.8.1\\sccache.exe"
-
-
 [profile.dev.build-override]
 opt-level = 3
 
