@@ -2,7 +2,7 @@
 A sort of scripting programming language, that is NOT actually a programming language because it's just transpiling in the background.
 
 ### TODO / LOG
-- [] Transpiler indent <--
+- [x] Transpiler indent
 - [x] Lexer error on missing string qoutes
 
 - Parser Refactor
@@ -19,7 +19,7 @@ A sort of scripting programming language, that is NOT actually a programming lan
         - [x] Signal update
         - [x] Reactive stmt
 
-    - []  Arrays/Indexing <--
+    - [x]  Arrays/Indexing
 
 - [x] Conditionals 
     - [x] If
@@ -34,6 +34,10 @@ A sort of scripting programming language, that is NOT actually a programming lan
  
 # Syntax    
 Not yet decided, but it will be a mix of Svelte, Python, and Rust. (Hot mess)
+
+The syntax below is covered by contract tests for lexer/parser/AST shape, Python
+output, and selected runtime behavior.
+
 ```lang
 // This is a comment
 
@@ -93,3 +97,48 @@ a = 1
 "A's value is %a"
 "{a:02d}" // 01
 ```
+
+## Rust-like objects
+
+Structs, traits, and impl blocks transpile to Python classes plus runtime helper
+checks. Generic parameters are preserved as metadata in v1; concrete field and
+method argument annotations are checked at runtime.
+
+```lang
+struct User<T> {
+    name: str,
+    age: int,
+}
+
+trait Named<T> {
+    fn label(self) -> str
+}
+
+impl<T> User<T> {
+    fn rename(self, name: str) {
+        self.name = name
+    }
+}
+
+impl<T> Named<T> for User<T> {
+    fn label(self) -> str {
+        self.name
+    }
+}
+
+user = User { name: "Ada", age: 36 }
+user.rename("Vey")
+print(user.label())
+```
+
+## Tests
+
+```shell
+cargo test
+```
+
+The integration suites live in `tests/`:
+- `lexer_contracts.rs` checks tokenization.
+- `parser_contracts.rs` checks AST shape for parser context rules.
+- `python_transpiler_contracts.rs` checks generated Python and runtime behavior.
+- `object_contracts.rs` checks struct, trait, impl, and runtime type/trait errors.
