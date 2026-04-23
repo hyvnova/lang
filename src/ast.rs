@@ -341,7 +341,6 @@ impl AST {
             let sequence = Node::Sequence(self.get_scope());
             
             // If only 1 scope then, just clear it out because it's main scope, if poped, big trouble :D
-            dbg!(&self.scopes);
             if self.scopes.len() == 1 {
                 self.scopes.get_mut(0).unwrap().clear();
             } else {

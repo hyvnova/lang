@@ -26,6 +26,11 @@ macro_rules! bi {
 const EXPR_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE];
 /// Like EXPR_END, but allows finishing an expression at the end of a block.
 const EXPR_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_BRACKET];
+const RANGE_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_ARROW];
+const RANGE_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_BRACKET, Kind::R_ARROW];
+const RANGE_END_OR_L_BRACKET: &[Kind] = &[Kind::L_BRACKET, Kind::R_ARROW];
+const RANGE_END_OR_R_PARENT: &[Kind] = &[Kind::R_PARENT, Kind::R_ARROW];
+const RANGE_END_OR_R_SQUARE_BRACKET: &[Kind] = &[Kind::R_SQUARE_BRACKET, Kind::R_ARROW];
 
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
@@ -179,7 +184,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
             });
 
-        scope
+        Self::normalize_scope(scope)
     }
 
     /// Parses parenthesis.
@@ -193,7 +198,7 @@ impl<'stop_arr> Parser<'stop_arr> {
 
         let mut scope = self.parse_until(Some(&[Kind::R_PARENT]));
 
-        println!("PAREN: {:?}, stopped: {:?}", scope, self.stopped_at);
+        log!("PAREN", "{:?}, stopped: {:?}", scope, self.stopped_at);
 
         // Ensure closing parenthesis was found
         if self.next_token().is_not(Kind::R_PARENT) {
@@ -299,6 +304,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                 }
             }
         }
+
+        if let Some(scope) = self.ast.scopes.last_mut() {
+            let current_scope = std::mem::take(scope);
+            *scope = Self::normalize_scope(current_scope);
+        }
     }
 
     /// Skips newlines.
@@ -336,11 +346,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                 None => EXPR_END,
             };
 
-            println!("->{:?}  Stops: {:?}", next_token, self.stops);
+            log!("TOKEN", "{:?}  Stops: {:?}", next_token, self.stops);
 
             // * Stop at
             if current_stop.contains(&next_token.kind) {
-                println!("\tStopping at: {:?}", next_token);
+                log!("STOP", "{:?}", next_token);
 
                 if self.capturing_sequence {
                     self.capturing_sequence = false;
@@ -554,7 +564,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                             error!(&self.lexer, "Expected an expression after \"if\".")
                         });
 
-                    println!("Condition: {:?}", condition);
+                    log!("IF", "Condition: {:?}", condition);
 
                     // Ensure we stop at L_BRACKET
                     if self.next_token().is_not(Kind::L_BRACKET) {
@@ -605,7 +615,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         else_body = Some(bi!(block));
                     }
 
-                    println!("IF: {:?} {:?} {:?}", condition, block, elifs);
+                    log!("IF", "{:?} {:?} {:?}", condition, block, elifs);
 
                     self.ast.add_node(Node::Conditional {
                         condition: bi!(condition),
@@ -658,7 +668,7 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                     // * If parsing parethensis it's a named arg
                     if self.parsing_paren && !is_walrus {
-                        println!("NAMED ARG: {:?} {:?} {:?}", lhs, op, rhs);
+                        log!("NAMED ARG", "{:?} {:?} {:?}", lhs, op, rhs);
 
                         match lhs {
                             Node::Identifier(name) => {
@@ -932,7 +942,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                         false
                     };
 
-                    let rhs: Node = self.parse_until(Some(current_stop)).get_first_or_else(|| {
+                    let rhs: Node = self.parse_until(Some(Self::range_stop(current_stop))).get_first_or_else(|| {
                         // If there's no RHS, end will be the length of the thing being indexed
                         // This of course will only work if we indexing, otherwise it will be an error.
                         Node::Empty
@@ -959,13 +969,6 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                 // * Member Acess / Dot Operator / Method Call
                 DOT => {
-                    // Parse property, shoulld be an identifier
-                    let prop: Node = self
-                        .parse_until(None)
-                        .get_first_or_else(|| {
-                            error!(&self.lexer, "Expected a property after \".\".")
-                        });
-
                     // Get object; value being accessed, should be the last node in the scope
                     let object: Node = self.ast
                         .pop_node()
@@ -975,6 +978,16 @@ impl<'stop_arr> Parser<'stop_arr> {
                                 "Expected an object before \".\".\nEx. object.property \n -If you were trying to access a member of an object."
                             )
                         });
+
+                    let prop = match self.next_token() {
+                        Some(Token { kind: Kind::IDENTIFIER, value, .. }) => Node::Identifier(value),
+                        Some(other) =>
+                            error!(
+                                &self.lexer,
+                                format!("Expected an identifier after \".\". Got: {:?}", other)
+                            ),
+                        None => error!(&self.lexer, "Expected a property after \".\"."),
+                    };
 
                     // Otherwise, it's an member access
                     self.ast.add_node(Node::MemberAccess {
@@ -1090,7 +1103,6 @@ impl<'stop_arr> Parser<'stop_arr> {
                         .unwrap_or_else(|| { error!(&self.lexer, "Expected a Node before '->'.") });
                     let lhs_nodes = match lhs_node {
                         Node::Assign { identifiers, values, op } => {
-                            dbg!("Assingmentin in distribution");
                             // Instead of wrapping the entire assignment, use its value(s)
                             values
                         }
@@ -1185,6 +1197,182 @@ impl<'stop_arr> Parser<'stop_arr> {
                     continue;
                 }
             }
+        }
+    }
+
+    fn range_stop(current_stop: &[Kind]) -> &'static [Kind] {
+        if current_stop == EXPR_END {
+            RANGE_END
+        } else if current_stop == EXPR_END_OR_R_BRACKET {
+            RANGE_END_OR_R_BRACKET
+        } else if current_stop == [Kind::L_BRACKET] {
+            RANGE_END_OR_L_BRACKET
+        } else if current_stop == [Kind::R_PARENT] {
+            RANGE_END_OR_R_PARENT
+        } else if current_stop == [Kind::R_SQUARE_BRACKET] {
+            RANGE_END_OR_R_SQUARE_BRACKET
+        } else {
+            RANGE_END
+        }
+    }
+
+    fn normalize_scope(scope: Vec<Node>) -> Vec<Node> {
+        scope.into_iter().map(Self::normalize_node).collect()
+    }
+
+    fn normalize_node(node: Node) -> Node {
+        match node {
+            Node::MemberAccess { object, member } => Node::MemberAccess {
+                object: bi!(Self::normalize_node(*object)),
+                member: bi!(Self::normalize_node(*member)),
+            },
+            Node::Group(expr) => Node::Group(expr.map(|expr| bi!(Self::normalize_node(*expr)))),
+            Node::BinOp { lhs, op, rhs } => Self::normalize_binop(*lhs, op, *rhs),
+            Node::UnaryOp { op, expr } => Node::UnaryOp {
+                op,
+                expr: bi!(Self::normalize_node(*expr)),
+            },
+            Node::NamedArg(name, value) => Node::NamedArg(name, bi!(Self::normalize_node(*value))),
+            Node::Array(values) => Node::Array(bi!(Self::normalize_node(*values))),
+            Node::Index { object, index } => Node::Index {
+                object: bi!(Self::normalize_node(*object)),
+                index: bi!(Self::normalize_node(*index)),
+            },
+            Node::Sequence(values) => Node::Sequence(Self::normalize_scope(values)),
+            Node::WrappedSequence(values) => Node::WrappedSequence(Self::normalize_scope(values)),
+            Node::Block(nodes) => Node::Block(Self::normalize_scope(nodes)),
+            Node::FnBody(nodes) => Node::FnBody(Self::normalize_scope(nodes)),
+            Node::FunctionCall { object, args } => Node::FunctionCall {
+                object: bi!(Self::normalize_node(*object)),
+                args: bi!(Self::normalize_node(*args)),
+            },
+            Node::Return(value) => Node::Return(bi!(Self::normalize_node(*value))),
+            Node::Dict { keys, values } => Node::Dict {
+                keys: Self::normalize_scope(keys),
+                values: Self::normalize_scope(values),
+            },
+            Node::Alias(value) => Node::Alias(bi!(Self::normalize_node(*value))),
+            Node::Range { start, end, inclusive } => Node::Range {
+                start: bi!(Self::normalize_node(*start)),
+                end: bi!(Self::normalize_node(*end)),
+                inclusive,
+            },
+            Node::Len(value) => Node::Len(bi!(Self::normalize_node(*value))),
+            Node::Distribution { args, recipients } => Node::Distribution {
+                args: Self::normalize_scope(args),
+                recipients: Self::normalize_scope(recipients),
+            },
+            Node::IterDistribution { args, recipients } => Node::IterDistribution {
+                args: Self::normalize_scope(args),
+                recipients: Self::normalize_scope(recipients),
+            },
+            Node::Decorator { name, args } => Node::Decorator {
+                name: bi!(Self::normalize_node(*name)),
+                args: args.map(|args| bi!(Self::normalize_node(*args))),
+            },
+            Node::Lambda { args, body } => Node::Lambda {
+                args: bi!(Self::normalize_node(*args)),
+                body: bi!(Self::normalize_node(*body)),
+            },
+            Node::Conditional { condition, body, elifs, else_body } => Node::Conditional {
+                condition: bi!(Self::normalize_node(*condition)),
+                body: bi!(Self::normalize_node(*body)),
+                elifs: elifs
+                    .into_iter()
+                    .map(|(condition, body)| {
+                        (Self::normalize_node(condition), Self::normalize_node(body))
+                    })
+                    .collect(),
+                else_body: else_body.map(|body| bi!(Self::normalize_node(*body))),
+            },
+            Node::Assign { identifiers, values, op } => Node::Assign {
+                identifiers: Self::normalize_scope(identifiers),
+                values: Self::normalize_scope(values),
+                op,
+            },
+            Node::SignalDef { name, value, dependencies } => Node::SignalDef {
+                name,
+                value: bi!(Self::normalize_node(*value)),
+                dependencies,
+            },
+            Node::SignalUpdate { name, value, dependencies } => Node::SignalUpdate {
+                name,
+                value: bi!(Self::normalize_node(*value)),
+                dependencies,
+            },
+            Node::Deconstruction { identifiers, value, default_values } => Node::Deconstruction {
+                identifiers: Self::normalize_scope(identifiers),
+                value: bi!(Self::normalize_node(*value)),
+                default_values: Self::normalize_scope(default_values),
+            },
+            Node::FunctionDef { name, args, body } => Node::FunctionDef {
+                name,
+                args: bi!(Self::normalize_node(*args)),
+                body: bi!(Self::normalize_node(*body)),
+            },
+            Node::ReactiveStmt { block, dependencies } => Node::ReactiveStmt {
+                block: Self::normalize_scope(block),
+                dependencies,
+            },
+            Node::Loop(body) => Node::Loop(bi!(Self::normalize_node(*body))),
+            Node::ForLoop { item, iterable, body } => Node::ForLoop {
+                item: bi!(Self::normalize_node(*item)),
+                iterable: bi!(Self::normalize_node(*iterable)),
+                body: bi!(Self::normalize_node(*body)),
+            },
+            Node::WhileLoop { condition, body } => Node::WhileLoop {
+                condition: bi!(Self::normalize_node(*condition)),
+                body: bi!(Self::normalize_node(*body)),
+            },
+            other => other,
+        }
+    }
+
+    fn normalize_binop(lhs: Node, op: String, rhs: Node) -> Node {
+        let lhs = Self::normalize_node(lhs);
+        let rhs = Self::normalize_node(rhs);
+
+        if let Node::BinOp { lhs: rhs_lhs, op: rhs_op, rhs: rhs_rhs } = rhs {
+            if Self::should_rotate_binop(&op, &rhs_op) {
+                let rotated_lhs = Node::BinOp {
+                    lhs: bi!(lhs),
+                    op,
+                    rhs: rhs_lhs,
+                };
+
+                return Self::normalize_binop(rotated_lhs, rhs_op, *rhs_rhs);
+            }
+
+            return Node::BinOp {
+                lhs: bi!(lhs),
+                op,
+                rhs: bi!(Node::BinOp { lhs: rhs_lhs, op: rhs_op, rhs: rhs_rhs }),
+            };
+        }
+
+        Node::BinOp { lhs: bi!(lhs), op, rhs: bi!(rhs) }
+    }
+
+    fn should_rotate_binop(left_op: &str, right_op: &str) -> bool {
+        if left_op == "**" {
+            return false;
+        }
+
+        Self::precedence(left_op) >= Self::precedence(right_op)
+    }
+
+    fn precedence(op: &str) -> usize {
+        match op {
+            "||" => 1,
+            "&&" => 2,
+            "==" | "!=" | "<" | "<=" | ">" | ">=" => 3,
+            "|" => 4,
+            "^" => 5,
+            "&" => 6,
+            "+" | "-" => 7,
+            "*" | "/" | "%" => 8,
+            "**" => 9,
+            _ => 0,
         }
     }
 }

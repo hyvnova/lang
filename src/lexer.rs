@@ -539,7 +539,6 @@ impl Lexer {
                                 }
 
                                 let buff_str = buffer.iter().collect::<String>();
-                                println!("Buffer str  {}", buff_str);
                                 if buff_str == "[endpython]" {
                                     break;
                                 } else {
