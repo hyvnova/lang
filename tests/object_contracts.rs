@@ -131,3 +131,32 @@ user = User { name: "Ada", age: "old" }
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn generated_python_rejects_incomplete_trait_impl() {
+    let code = transpile(
+        r#"
+struct User {}
+
+trait Named {
+    fn label(self) -> str
+}
+
+impl Named for User {}
+"#,
+    );
+
+    let output = Command::new("py")
+        .arg("-c")
+        .arg(&code)
+        .output()
+        .or_else(|_| Command::new("python").arg("-c").arg(&code).output())
+        .expect("failed to run Python");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("missing label"),
+        "expected trait contract error, got stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

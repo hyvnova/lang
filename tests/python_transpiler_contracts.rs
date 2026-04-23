@@ -41,3 +41,29 @@ print(add(2, 4))
         "6",
     );
 }
+
+#[test]
+fn generated_python_runs_loop_over_range() {
+    assert_python_runs(
+        r#"
+for x in 1..3 {
+    print(x)
+}
+"#,
+        "1\n2",
+    );
+}
+
+#[test]
+fn generated_python_runs_signal_updates() {
+    assert_python_runs(
+        r#"
+$a = 1
+$b = $a + 1
+print($b)
+$a = 2
+print($b)
+"#,
+        "2\n3",
+    );
+}

@@ -93,7 +93,8 @@ pub fn assert_python_runs(source: &str, expected_stdout: &str) {
         code
     );
 
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected_stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout.trim(), expected_stdout);
 }
 
 fn python_output(args: &[&str], stdin: &str) -> std::process::Output {
