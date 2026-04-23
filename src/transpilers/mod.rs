@@ -8,7 +8,7 @@ pub mod python_transpiler;
 
 #[macro_export]
 /// Use a transpiler
-/// ```rust
+/// ```ignore
 /// use_transpiler!("python", ast); // -> Returns code in Python
 /// ```
 macro_rules! use_transpiler {

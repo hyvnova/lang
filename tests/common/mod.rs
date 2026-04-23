@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use lang::{
     ast::{Node, AST},
     lexer::{Kind, Lexer},
@@ -62,7 +64,13 @@ pub fn transpile_body(source: &str) -> String {
 }
 
 pub fn assert_python_compiles(code: &str) {
-    let output = python_output(&["-m", "py_compile", "-"], code);
+    let output = python_output(
+        &[
+            "-c",
+            "import sys; compile(sys.stdin.read(), '<generated>', 'exec')",
+        ],
+        code,
+    );
 
     assert!(
         output.status.success(),

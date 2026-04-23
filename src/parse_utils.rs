@@ -29,14 +29,14 @@ impl IsKind for Token {
 /// Converts contractors into an iterator, takes the first element, and if there is none, returns the default value.
 /// Overall this is supposed to make code more readable
 /// ### Example (without)
-/// ```
+/// ```ignore
 /// let rhs: Node = self.parse_until(None).into_iter().next().unwrap_or_else(|| {  // <-- This 
 ///     error!(&self.lexer, "Expected an value after assignment operator.")
 /// });
 /// ```
 /// 
 /// ### Example (with)
-/// ```
+/// ```ignore
 /// let rhs: Node = self.parse_until(None).get_first_or_else(|| { error!(&self.lexer, "Expected an value after assignment operator.") });
 /// ```
 pub trait GetFirstOrElse {

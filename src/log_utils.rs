@@ -84,20 +84,24 @@ macro_rules! error {
 #[cfg(debug_assertions)]
 #[macro_export]
 /// A macro for creating debug log messages.
-/// ```
+/// ```ignore
 /// log!("DEBUG", "This is a debug message");
 /// log!("DEBUG", "This is a debug message with a number: {}", 42);
 /// ```
 macro_rules! log {
     ($label:expr) => {{
-        use colored::*;
-        println!("{}", format!("[{}]", $label).bold().cyan());
+        if std::env::var_os("LANG_DEBUG").is_some() {
+            use colored::*;
+            println!("{}", format!("[{}]", $label).bold().cyan());
+        }
     }};
 
     ($label:expr, $($arg:tt)*) => {{
-        use colored::*;
+        if std::env::var_os("LANG_DEBUG").is_some() {
+            use colored::*;
 
-        println!("{}\n   {}", format!("[{}]", $label).bold().cyan(), format!($($arg)*).green());
+            println!("{}\n   {}", format!("[{}]", $label).bold().cyan(), format!($($arg)*).green());
+        }
     }};
 }
 
@@ -122,7 +126,7 @@ pub fn add_line_numbers(source: &str) -> String {
 
 /// Highlight the current line in the source code.
 /// Ex.
-/// ```
+/// ```text
 /// a = 1 + 2
 /// ^^^^^^^^
 /// ```
