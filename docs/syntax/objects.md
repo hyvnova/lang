@@ -10,6 +10,7 @@ Lang exposes a Rust-like object model through `struct`, `trait`, `impl`, and str
 - Trait implementations use `impl Trait for Name { ... }`.
 - Struct literals use `Type { field: value }`.
 - Generic parameters use `Name<T>`.
+- Attached macros use `#name(...)` on the next item. See [Macros](./macros.md).
 
 ## Examples
 
@@ -57,3 +58,4 @@ print(user.label())
 - Concrete field annotations such as `str` and `int` are checked at runtime when a struct value is constructed.
 - Concrete method argument annotations are checked at runtime when the method is called.
 - Trait implementations are checked at runtime. An incomplete `impl Trait for Type` fails when the generated Python module is loaded.
+- Derived behavior such as `#derive(debug)` expands into normal `trait` and `impl` items before AST parsing.

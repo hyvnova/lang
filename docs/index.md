@@ -9,6 +9,7 @@ These docs are the **official syntax reference** for the **tested** language sur
 - [Expressions](./syntax/expressions.md)
 - [Control Flow](./syntax/control-flow.md)
 - [Objects](./syntax/objects.md)
+- [Macros](./syntax/macros.md)
 
 ## Validation
 
@@ -22,4 +23,4 @@ The tests currently cover:
 
 - tokenization for core syntax and object keywords
 - parser shape for precedence, member access, member assignment, and range distribution
-- Python transpilation and runtime behavior for functions, loops, signals, arrays, lambdas, raw Python interop, and Rust-like objects
+- Python transpilation and runtime behavior for functions, loops, signals, arrays, lambdas, raw Python interop, Rust-like objects, and `#derive(debug)`
