@@ -1,5 +1,5 @@
 use crate::{
-    log_utils::add_line_numbers, parser::Parser as LangParser, transpilers, use_transpiler,
+    log_utils::add_line_numbers, modules, parser::Parser as LangParser, transpilers, use_transpiler,
 };
 use std::path::PathBuf;
 
@@ -22,6 +22,10 @@ enum Commands {
     Run {
         // File to run
         file: PathBuf,
+
+        /// Project root used for absolute module imports.
+        #[arg(long)]
+        project_root: Option<PathBuf>,
 
         // Transpiler to use
         #[arg(short, long, default_value = "python")]
@@ -46,9 +50,17 @@ pub fn main() {
     let args = Args::parse();
 
     match args.command {
-        Commands::Run { file, transpiler } => {
-            let parser = LangParser::from_path(file);
-            run_lang(parser, transpiler.unwrap());
+        Commands::Run { file, project_root, transpiler } => {
+            if transpiler.as_deref() != Some("python") {
+                panic!("Only the python transpiler supports modules right now.");
+            }
+
+            let output = modules::run_project(file, project_root)
+                .unwrap_or_else(|error| panic!("{}", error));
+
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            std::process::exit(output.status.code().unwrap_or(1));
         }
 
         Commands::Eval { code, transpiler } => {

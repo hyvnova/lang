@@ -6,6 +6,7 @@ pub mod parse_utils;
 
 pub mod lexer;
 pub mod macros;
+pub mod modules;
 pub mod parser;
 pub mod ast;
 pub mod signal;
