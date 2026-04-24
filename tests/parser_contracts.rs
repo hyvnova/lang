@@ -59,3 +59,22 @@ fn parses_operator_precedence_into_ast_shape() {
     assert!(matches!(lhs.as_ref(), Node::BinOp { op, .. } if op == "*"));
     assert!(matches!(rhs.as_ref(), Node::Number(value) if value == "3"));
 }
+
+#[test]
+fn parses_module_statements_and_public_bindings() {
+    let nodes = parse_nodes(
+        r#"
+pub mod math
+import .math.vec as vec
+from app.math import value, Vec2
+pub use app.math.vec.Vec2
+pub answer = 42
+"#,
+    );
+
+    assert!(matches!(&nodes[0], Node::ModuleDecl { name, public } if name == "math" && *public));
+    assert!(matches!(&nodes[1], Node::ImportStmt { alias, .. } if alias.as_deref() == Some("vec")));
+    assert!(matches!(&nodes[2], Node::FromImport { names, wildcard, .. } if !*wildcard && names.len() == 2));
+    assert!(matches!(&nodes[3], Node::UseDecl { public, .. } if *public));
+    assert!(matches!(&nodes[4], Node::BindingDef { name, public, .. } if name == "answer" && *public));
+}

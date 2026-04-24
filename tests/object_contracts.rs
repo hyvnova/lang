@@ -33,7 +33,7 @@ user = User { name: "Ada", age: 36 }
 fn parses_rust_like_object_model_nodes() {
     let nodes = parse_nodes(OBJECT_SOURCE);
 
-    let Node::StructDef { name, generics, fields } = &nodes[0] else {
+    let Node::StructDef { name, generics, fields, .. } = &nodes[0] else {
         panic!("expected struct definition, got {:#?}", nodes[0]);
     };
     assert_eq!(name, "User");
@@ -43,7 +43,7 @@ fn parses_rust_like_object_model_nodes() {
     assert_eq!(fields[1].name, "age");
     assert_eq!(fields[1].type_ref.name, "int");
 
-    let Node::TraitDef { name, generics, methods } = &nodes[1] else {
+    let Node::TraitDef { name, generics, methods, .. } = &nodes[1] else {
         panic!("expected trait definition, got {:#?}", nodes[1]);
     };
     assert_eq!(name, "Named");
@@ -65,10 +65,10 @@ fn parses_rust_like_object_model_nodes() {
     assert_eq!(target.name, "User");
     assert_eq!(methods[0].signature.name, "label");
 
-    let Node::Assign { values, .. } = &nodes[4] else {
+    let Node::BindingDef { value, .. } = &nodes[4] else {
         panic!("expected struct literal assignment, got {:#?}", nodes[4]);
     };
-    assert!(matches!(values[0], Node::StructInit { .. }));
+    assert!(matches!(value.as_ref(), Node::StructInit { .. }));
 }
 
 #[test]

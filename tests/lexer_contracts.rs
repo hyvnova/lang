@@ -86,3 +86,41 @@ fn lexes_attribute_macro_tokens_without_affecting_hash_python_blocks() {
 
     assert_eq!(lex_kinds("#[python]\nprint('ok')\n#[endpython]"), vec![Kind::PYTHON]);
 }
+
+#[test]
+fn lexes_module_system_keywords() {
+    let tokens = lex("pub mod math import .math.vec as vec from app.math import value use app.math.vec.Vec2");
+
+    assert_eq!(
+        tokens
+            .into_iter()
+            .map(|(kind, value)| format!("{kind}:{value}"))
+            .collect::<Vec<String>>(),
+        vec![
+            "PUB:pub",
+            "MOD_DECL:mod",
+            "IDENTIFIER:math",
+            "IMPORT:import",
+            "DOT:.",
+            "IDENTIFIER:math",
+            "DOT:.",
+            "IDENTIFIER:vec",
+            "AS:as",
+            "IDENTIFIER:vec",
+            "FROM:from",
+            "IDENTIFIER:app",
+            "DOT:.",
+            "IDENTIFIER:math",
+            "IMPORT:import",
+            "IDENTIFIER:value",
+            "USE:use",
+            "IDENTIFIER:app",
+            "DOT:.",
+            "IDENTIFIER:math",
+            "DOT:.",
+            "IDENTIFIER:vec",
+            "DOT:.",
+            "IDENTIFIER:Vec2",
+        ]
+    );
+}

@@ -14,7 +14,7 @@ use std::path::Path;
 use crate::hyvnts_tools::strings::StrUtils;
 
 /// Folder containing custom builtins modules for Python
-const BUILTINS_PATH: &str = "./src/transpilers/python/custom_builtins/";
+const BUILTINS_REL_PATH: &str = "src/transpilers/python/custom_builtins";
 
 /// Helper that owns the output and handles indentation.
 struct PyEmitter {
@@ -91,19 +91,23 @@ impl Transpiler {
     /// This function emits a preamble of custom builtins imports if available.
     pub fn transpile(&mut self, ast: &AST) -> String {
         let mut emitter = PyEmitter::new(self.indent_char.clone());
+        let builtins_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(BUILTINS_REL_PATH)
+            .to_string_lossy()
+            .replace('\\', "/");
 
         // Include custom builtins
         // If the builtins directory doesn't exist, skip it
-        if !Path::new(BUILTINS_PATH).exists() {
-            eprintln!("[Python Transpiler] Custom builtins not found at: {}", BUILTINS_PATH);
+        if !Path::new(&builtins_path).exists() {
+            eprintln!("[Python Transpiler] Custom builtins not found at: {}", builtins_path);
             eprintln!("[Python Transpiler] Skipping custom builtins");
         } else {
             emitter.line("# Custom builtins");
             emitter.line("import sys");
-            emitter.line(format!("sys.path.append('{}')", BUILTINS_PATH));
+            emitter.line(format!("sys.path.append(r'{}')", builtins_path));
 
             let mut builtin_modules = fs
-                ::read_dir(BUILTINS_PATH)
+                ::read_dir(&builtins_path)
                 .expect("Failed to read  custom builtin directory")
                 .filter_map(|entry| {
                     let entry: fs::DirEntry = entry.ok()?;
@@ -145,6 +149,10 @@ impl Transpiler {
             Empty => {}
             Newline => emitter.blank(),
             Comment(comment) => self.emit_comment(emitter, comment),
+            BindingDef { name, value, .. } => {
+                let value_str = self.emit_expr(emitter, value);
+                emitter.line(format!("{} = {}", name, value_str));
+            }
 
             Assign { identifiers, values, op } => {
                 for (i, ident) in identifiers.iter().enumerate() {
@@ -179,7 +187,7 @@ impl Transpiler {
                 }
             }
 
-            FunctionDef { name, args, body } => {
+            FunctionDef { name, args, body, .. } => {
                 let args_str = self.emit_arg_list(emitter, args);
                 emitter.line(format!("def {}{}:", name, args_str));
                 emitter.indented(|em| match body.as_ref() {
@@ -189,11 +197,11 @@ impl Transpiler {
                 });
             }
 
-            StructDef { name, generics, fields } => {
+            StructDef { name, generics, fields, .. } => {
                 self.emit_struct_def(emitter, name, generics, fields);
             }
 
-            TraitDef { name, generics, methods } => {
+            TraitDef { name, generics, methods, .. } => {
                 self.emit_trait_def(emitter, name, generics, methods);
             }
 

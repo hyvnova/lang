@@ -2,7 +2,7 @@ use core::panic;
 use std::{ fs, path::PathBuf, vec };
 
 use crate::{
-    ast::{ FunctionParam, FunctionSignature, ImplMethod, Node, StructField, TypeRef, AST },
+    ast::{ FunctionParam, FunctionSignature, ImplMethod, ImportName, ModulePath, Node, StructField, TypeRef, AST },
     error,
     lexer::{ Kind, Lexer, Token },
     log,
@@ -425,63 +425,53 @@ impl<'stop_arr> Parser<'stop_arr> {
                     // self.ast.add_node(Node::Newline);
                 }
 
+                PUB => {
+                    let node = self.parse_public_item();
+                    self.ast.add_node(node);
+                    continue;
+                }
+
+                IMPORT => {
+                    let node = self.parse_import_stmt();
+                    self.ast.add_node(node);
+                    continue;
+                }
+
+                FROM => {
+                    let node = self.parse_from_import();
+                    self.ast.add_node(node);
+                    continue;
+                }
+
+                USE => {
+                    let node = self.parse_use_decl(false);
+                    self.ast.add_node(node);
+                    continue;
+                }
+
+                MOD_DECL => {
+                    let node = self.parse_module_decl(false);
+                    self.ast.add_node(node);
+                    continue;
+                }
+
                 // * Function Definition
                 // `def {ident}( {expr},* ) {block}`
                 // Ex. `def add(a, b) { return a + b; }`
                 // |   `def add(a, b) { a + b }`
                 FN_DEF => {
-
-                    // parse function name
-                    let ident_scope: Node = self
-                        .parse_until(Some(&[L_PARENT]))
-                        .get_first_or_else(|| {
-                            error!(&self.lexer, "Expected an identifier for function name.")
-                        });
-
-                    if self.next_token().is_not(Kind::L_PARENT) {
-                        error!(&self.lexer, "Expected a parenthesis after function name.");
-                    }
-
-                    log!("FN_DEF", "Ident Scope: {:?}", ident_scope);
-
-                    self.clean_stop(); // Remove L_PARENT stop
-
-                    // Ensure token in scope was an identifier
-                    let name: String = match ident_scope {
-                        Node::Identifier(name) => name,
-                        other =>
-                            error!(
-                                &self.lexer,
-                                format!(
-                                    "Expected an identifier for function name. Got: {:?}",
-                                    other
-                                )
-                            ),
-                    };
-
-                    // Parse function arguments
-                    let args: Box<Node> = bi!(self.parse_paren());
-
-                    // Ensure there's a block after the arguments
-                    if self.next_token().is_not(Kind::L_BRACKET) {
-                        error!(&self.lexer, "Expected a block after function arguments.");
-                    }
-
-                    // Parse function body
-                    let body: Box<Node> = bi!(self.parse_block(true));
-
-                    // Add function to AST
-                    self.ast.add_node(Node::FunctionDef { name, args, body });
+                    let node = self.parse_function_def(false);
+                    self.ast.add_node(node);
                     continue;
                 }
 
                 STRUCT => {
-                    let node = self.parse_struct_def();
+                    let node = self.parse_struct_def(false);
                     self.ast.add_node(node);
                     continue;
                 }
                 TRAIT => {
-                    let node = self.parse_trait_def();
+                    let node = self.parse_trait_def(false);
                     self.ast.add_node(node);
                     continue;
                 }
@@ -790,11 +780,22 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                         // * Assingments / Multiple assignments / Unpacking
                         (lhs, rhs) => {
-                            self.ast.add_node(Node::Assign {
-                                identifiers: vec![lhs],
-                                values: vec![rhs],
-                                op,
-                            });
+                            if self.should_promote_binding(&lhs, &op) {
+                                let Node::Identifier(name) = lhs else {
+                                    unreachable!("binding promotion requires an identifier lhs");
+                                };
+                                self.ast.add_node(Node::BindingDef {
+                                    name,
+                                    value: bi!(rhs),
+                                    public: false,
+                                });
+                            } else {
+                                self.ast.add_node(Node::Assign {
+                                    identifiers: vec![lhs],
+                                    values: vec![rhs],
+                                    op,
+                                });
+                            }
                         }
                     }
                     continue;
@@ -956,6 +957,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 AT => error!(&self.lexer, "Decorators are not supported yet."),
 
                 COLON => error!(&self.lexer, "Unexpected ':'."),
+                AS => error!(&self.lexer, "Unexpected 'as'."),
 
                 COMMA => {
                     if self.capturing_sequence {
@@ -1340,6 +1342,19 @@ impl<'stop_arr> Parser<'stop_arr> {
                     .collect(),
                 else_body: else_body.map(|body| bi!(Self::normalize_node(*body))),
             },
+            Node::ImportStmt { path, alias } => Node::ImportStmt { path, alias },
+            Node::FromImport { path, names, wildcard } => Node::FromImport {
+                path,
+                names,
+                wildcard,
+            },
+            Node::UseDecl { path, alias, public } => Node::UseDecl { path, alias, public },
+            Node::ModuleDecl { name, public } => Node::ModuleDecl { name, public },
+            Node::BindingDef { name, value, public } => Node::BindingDef {
+                name,
+                value: bi!(Self::normalize_node(*value)),
+                public,
+            },
             Node::Assign { identifiers, values, op } => Node::Assign {
                 identifiers: Self::normalize_scope(identifiers),
                 values: Self::normalize_scope(values),
@@ -1360,10 +1375,23 @@ impl<'stop_arr> Parser<'stop_arr> {
                 value: bi!(Self::normalize_node(*value)),
                 default_values: Self::normalize_scope(default_values),
             },
-            Node::FunctionDef { name, args, body } => Node::FunctionDef {
+            Node::FunctionDef { name, args, body, public } => Node::FunctionDef {
                 name,
                 args: bi!(Self::normalize_node(*args)),
                 body: bi!(Self::normalize_node(*body)),
+                public,
+            },
+            Node::StructDef { name, generics, fields, public } => Node::StructDef {
+                name,
+                generics,
+                fields,
+                public,
+            },
+            Node::TraitDef { name, generics, methods, public } => Node::TraitDef {
+                name,
+                generics,
+                methods,
+                public,
             },
             Node::ImplBlock { generics, trait_ref, target, methods } => Node::ImplBlock {
                 generics,
@@ -1450,7 +1478,131 @@ impl<'stop_arr> Parser<'stop_arr> {
         }
     }
 
-    fn parse_struct_def(&mut self) -> Node {
+    fn parse_public_item(&mut self) -> Node {
+        let token = self.next_token().unwrap_or_else(|| {
+            error!(&self.lexer, "Expected an item after 'pub'.")
+        });
+
+        match token.kind {
+            Kind::FN_DEF => self.parse_function_def(true),
+            Kind::STRUCT => self.parse_struct_def(true),
+            Kind::TRAIT => self.parse_trait_def(true),
+            Kind::MOD_DECL => self.parse_module_decl(true),
+            Kind::USE => self.parse_use_decl(true),
+            Kind::IDENTIFIER => self.parse_public_binding(token.value),
+            other => error!(
+                &self.lexer,
+                format!("Unsupported public item after 'pub': {:?}", other)
+            ),
+        }
+    }
+
+    fn parse_function_def(&mut self, public: bool) -> Node {
+        let ident_scope: Node = self
+            .parse_until(Some(&[Kind::L_PARENT]))
+            .get_first_or_else(|| {
+                error!(&self.lexer, "Expected an identifier for function name.")
+            });
+
+        if self.next_token().is_not(Kind::L_PARENT) {
+            error!(&self.lexer, "Expected a parenthesis after function name.");
+        }
+
+        log!("FN_DEF", "Ident Scope: {:?}", ident_scope);
+        self.clean_stop();
+
+        let name: String = match ident_scope {
+            Node::Identifier(name) => name,
+            other =>
+                error!(
+                    &self.lexer,
+                    format!("Expected an identifier for function name. Got: {:?}", other)
+                ),
+        };
+
+        let args: Box<Node> = bi!(self.parse_paren());
+
+        if self.next_token().is_not(Kind::L_BRACKET) {
+            error!(&self.lexer, "Expected a block after function arguments.");
+        }
+
+        let body: Box<Node> = bi!(self.parse_block(true));
+        Node::FunctionDef { name, args, body, public }
+    }
+
+    fn parse_import_stmt(&mut self) -> Node {
+        let path = self.parse_module_path();
+        let alias = if self.peek_token().is(Kind::AS) {
+            self.next_token();
+            Some(self.parse_identifier_name("Expected an alias after 'as'."))
+        } else {
+            None
+        };
+
+        Node::ImportStmt { path, alias }
+    }
+
+    fn parse_from_import(&mut self) -> Node {
+        let path = self.parse_module_path();
+        self.expect_token(Kind::IMPORT, "Expected 'import' after module path in from-import.");
+
+        let mut names = Vec::new();
+        let wildcard = if self.peek_token().is(Kind::MULTIPLY) {
+            self.next_token();
+            true
+        } else {
+            loop {
+                let name = self.parse_identifier_name("Expected an imported name.");
+                let alias = if self.peek_token().is(Kind::AS) {
+                    self.next_token();
+                    Some(self.parse_identifier_name("Expected an alias after 'as'."))
+                } else {
+                    None
+                };
+                names.push(ImportName { name, alias });
+
+                if self.peek_token().is_not(Kind::COMMA) {
+                    break;
+                }
+                self.next_token();
+            }
+            false
+        };
+
+        Node::FromImport { path, names, wildcard }
+    }
+
+    fn parse_use_decl(&mut self, public: bool) -> Node {
+        let path = self.parse_module_path();
+        let alias = if self.peek_token().is(Kind::AS) {
+            self.next_token();
+            Some(self.parse_identifier_name("Expected an alias after 'as'."))
+        } else {
+            None
+        };
+
+        Node::UseDecl { path, alias, public }
+    }
+
+    fn parse_module_decl(&mut self, public: bool) -> Node {
+        let name = self.parse_identifier_name("Expected a child module name after 'mod'.");
+        Node::ModuleDecl { name, public }
+    }
+
+    fn parse_public_binding(&mut self, name: String) -> Node {
+        self.expect_token(Kind::ASSIGN, "Expected '=' after public binding name.");
+        let value = self
+            .parse_until(None)
+            .get_first_or_else(|| error!(&self.lexer, "Expected a value after '='."));
+
+        Node::BindingDef {
+            name,
+            value: bi!(value),
+            public: true,
+        }
+    }
+
+    fn parse_struct_def(&mut self, public: bool) -> Node {
         let name = self.parse_identifier_name("Expected a struct name after \"struct\".");
         let generics = self.parse_generic_names();
 
@@ -1473,10 +1625,10 @@ impl<'stop_arr> Parser<'stop_arr> {
             self.consume_decl_separator();
         }
 
-        Node::StructDef { name, generics, fields }
+        Node::StructDef { name, generics, fields, public }
     }
 
-    fn parse_trait_def(&mut self) -> Node {
+    fn parse_trait_def(&mut self, public: bool) -> Node {
         let name = self.parse_identifier_name("Expected a trait name after \"trait\".");
         let generics = self.parse_generic_names();
 
@@ -1496,7 +1648,7 @@ impl<'stop_arr> Parser<'stop_arr> {
             self.consume_decl_separator();
         }
 
-        Node::TraitDef { name, generics, methods }
+        Node::TraitDef { name, generics, methods, public }
     }
 
     fn parse_impl_block(&mut self) -> Node {
@@ -1631,6 +1783,30 @@ impl<'stop_arr> Parser<'stop_arr> {
         params
     }
 
+    fn parse_module_path(&mut self) -> ModulePath {
+        let mut relative_level = 0;
+
+        while self.peek_token().is(Kind::DOT) {
+            self.next_token();
+            relative_level += 1;
+        }
+
+        let mut segments = Vec::new();
+
+        if self.peek_token().is(Kind::IDENTIFIER) {
+            segments.push(self.parse_identifier_name("Expected a module path segment."));
+
+            while self.peek_token().is(Kind::DOT) {
+                self.next_token();
+                segments.push(self.parse_identifier_name("Expected a module path segment after '.'."));
+            }
+        } else if relative_level == 0 {
+            error!(&self.lexer, "Expected a module path.");
+        }
+
+        ModulePath::new(relative_level, segments)
+    }
+
     fn parse_type_ref(&mut self) -> TypeRef {
         let name = self.parse_identifier_name("Expected a type name.");
         let generics = if self.peek_token().is(Kind::LT) {
@@ -1719,6 +1895,10 @@ impl<'stop_arr> Parser<'stop_arr> {
                 _ => break,
             }
         }
+    }
+
+    fn should_promote_binding(&self, lhs: &Node, op: &str) -> bool {
+        self.ast.scopes.len() == 1 && op == "=" && matches!(lhs, Node::Identifier(_))
     }
 
     fn pop_struct_init_name(&mut self) -> Option<TypeRef> {

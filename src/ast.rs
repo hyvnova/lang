@@ -1,6 +1,28 @@
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModulePath {
+    pub relative_level: usize,
+    pub segments: Vec<String>,
+}
+
+impl ModulePath {
+    pub fn new(relative_level: usize, segments: Vec<String>) -> Self {
+        ModulePath { relative_level, segments }
+    }
+
+    pub fn last_segment(&self) -> Option<&String> {
+        self.segments.last()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportName {
+    pub name: String,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeRef {
     pub name: String,
     pub generics: Vec<TypeRef>,
@@ -173,6 +195,34 @@ pub enum Node {
 
     Python(String), // Python code
 
+    ImportStmt {
+        path: ModulePath,
+        alias: Option<String>,
+    },
+
+    FromImport {
+        path: ModulePath,
+        names: Vec<ImportName>,
+        wildcard: bool,
+    },
+
+    UseDecl {
+        path: ModulePath,
+        alias: Option<String>,
+        public: bool,
+    },
+
+    ModuleDecl {
+        name: String,
+        public: bool,
+    },
+
+    BindingDef {
+        name: String,
+        value: Box<Node>,
+        public: bool,
+    },
+
     /// Represents a variable declaration. 
     /// The identifier can be a single identifier or a sequence of identifiers.
     /// Ex. `a = 1`, `a, b = 1, 2`
@@ -212,7 +262,8 @@ pub enum Node {
     FunctionDef {
         name: String, 
         args: Box<Node>,
-        body: Box<Node>
+        body: Box<Node>,
+        public: bool,
     },
 
     /// Rust-like struct declaration.
@@ -221,6 +272,7 @@ pub enum Node {
         name: String,
         generics: Vec<String>,
         fields: Vec<StructField>,
+        public: bool,
     },
 
     /// Rust-like trait declaration.
@@ -229,6 +281,7 @@ pub enum Node {
         name: String,
         generics: Vec<String>,
         methods: Vec<FunctionSignature>,
+        public: bool,
     },
 
     /// Rust-like implementation block.
@@ -311,6 +364,11 @@ impl PartialEq for Node {
             | (Lambda { .. }, Lambda { .. })
             | (Signal(_), Signal(_))
             | (Conditional { .. }, Conditional { .. })
+            | (ImportStmt { .. }, ImportStmt { .. })
+            | (FromImport { .. }, FromImport { .. })
+            | (UseDecl { .. }, UseDecl { .. })
+            | (ModuleDecl { .. }, ModuleDecl { .. })
+            | (BindingDef { .. }, BindingDef { .. })
             | (Assign { .. }, Assign { .. })
             | (FunctionDef { .. }, FunctionDef { .. })
             | (StructDef { .. }, StructDef { .. })
@@ -327,6 +385,7 @@ impl PartialEq for Node {
     }
 }   
 
+#[derive(Debug, Clone)]
 pub struct AST {
     // Vector of Scopes
     // A scope is a vector of nodes

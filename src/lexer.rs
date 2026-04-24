@@ -17,6 +17,12 @@ pub enum Kind {
     STRUCT,    // struct - data structure definition
     TRAIT,     // trait - behavior contract definition
     IMPL,      // impl - implementation block
+    MOD_DECL,  // mod - module declaration
+    IMPORT,    // import
+    FROM,      // from
+    USE,       // use
+    PUB,       // pub
+    AS,        // as
 
     LOOP,     // loop
     FOR,      // for
@@ -141,6 +147,12 @@ const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
     "struct" => Kind::STRUCT,
     "trait" => Kind::TRAIT,
     "impl" => Kind::IMPL,
+    "mod" => Kind::MOD_DECL,
+    "import" => Kind::IMPORT,
+    "from" => Kind::FROM,
+    "use" => Kind::USE,
+    "pub" => Kind::PUB,
+    "as" => Kind::AS,
 
     // Boolean literals
     "true" => Kind::TRUE,
