@@ -232,15 +232,7 @@ impl Lexer {
     /// Returns the current column index based on the source and cursor position.
     /// This is useful for error reporting when internal column tracking drifts.
     pub fn current_column(&self) -> usize {
-        let mut column = 0;
-        for ch in self.source.chars().take(self.current_char_index) {
-            if ch == '\n' {
-                column = 0;
-            } else {
-                column += 1;
-            }
-        }
-        column
+        self.column
     }
 
     fn next_raw_token(&mut self) -> Kind {

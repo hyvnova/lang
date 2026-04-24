@@ -60,3 +60,29 @@ fn lexes_rust_like_object_keywords() {
         ]
     );
 }
+
+#[test]
+fn lexes_attribute_macro_tokens_without_affecting_hash_python_blocks() {
+    let tokens = lex("#derive(debug)\nstruct Square { w: int }\n");
+
+    assert_eq!(
+        tokens
+            .into_iter()
+            .take(9)
+            .map(|(kind, value)| format!("{kind}:{value}"))
+            .collect::<Vec<String>>(),
+        vec![
+            "HASH:#",
+            "IDENTIFIER:derive",
+            "L_PARENT:(",
+            "IDENTIFIER:debug",
+            "R_PARENT:)",
+            "NEW_LINE:\n",
+            "STRUCT:struct",
+            "IDENTIFIER:Square",
+            "L_BRACKET:{",
+        ]
+    );
+
+    assert_eq!(lex_kinds("#[python]\nprint('ok')\n#[endpython]"), vec![Kind::PYTHON]);
+}

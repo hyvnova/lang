@@ -5,6 +5,7 @@ pub mod cli;
 pub mod parse_utils;
 
 pub mod lexer;
+pub mod macros;
 pub mod parser;
 pub mod ast;
 pub mod signal;

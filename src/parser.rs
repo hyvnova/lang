@@ -6,6 +6,7 @@ use crate::{
     error,
     lexer::{ Kind, Lexer, Token },
     log,
+    macros::{ expand_tokens, MacroError },
     parse_utils::{ GetFirstOrElse, IsKind },
     signal::clean_signals,
 };
@@ -36,6 +37,9 @@ const FIELD_VALUE_END: &[Kind] = &[Kind::COMMA, Kind::R_BRACKET, Kind::NEW_LINE,
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
     remainder_token: Option<Token>,
+
+    tokens: Vec<Token>,
+    cursor: usize,
 
     // lexer
     pub lexer: Lexer,
@@ -82,10 +86,26 @@ pub struct Parser<'stop_arr> {
 
 impl<'stop_arr> Parser<'stop_arr> {
     pub fn new(source: String) -> Self {
+        let tokens = {
+            let mut token_lexer = Lexer::new(source.clone());
+            let mut raw_tokens = Vec::new();
+
+            while let Some(token) = token_lexer.next() {
+                raw_tokens.push(token);
+            }
+
+            match expand_tokens(raw_tokens) {
+                Ok(tokens) => tokens,
+                Err(error) => Self::raise_macro_error(&source, error),
+            }
+        };
+
         let lexer = Lexer::new(source);
 
         Parser {
             remainder_token: None,
+            tokens,
+            cursor: 0,
             lexer,
             ast: AST::new(),
 
@@ -114,10 +134,14 @@ impl<'stop_arr> Parser<'stop_arr> {
 
     fn next_token(&mut self) -> Option<Token> {
         if let Some(token) = self.remainder_token.take() {
+            self.sync_lexer_to_token(&token);
             return Some(token);
         }
 
-        self.lexer.next()
+        let token = self.tokens.get(self.cursor).cloned()?;
+        self.cursor += 1;
+        self.sync_lexer_to_token(&token);
+        Some(token)
     }
 
     /// Cleans-up a stop
@@ -132,6 +156,18 @@ impl<'stop_arr> Parser<'stop_arr> {
     fn put_back(&mut self, token: Token) {
         // println!("[put_back] {:?}", token);
         self.remainder_token = Some(token);
+    }
+
+    fn sync_lexer_to_token(&mut self, token: &Token) {
+        self.lexer.line = token.line;
+        self.lexer.column = token.column;
+    }
+
+    fn raise_macro_error(source: &str, error: MacroError) -> ! {
+        let mut lexer = Lexer::new(source.to_string());
+        lexer.line = error.span.line;
+        lexer.column = error.span.column;
+        error!(&lexer, error.message)
     }
 
     /// Returns the next token without consuming it
@@ -1018,7 +1054,7 @@ impl<'stop_arr> Parser<'stop_arr> {
 
                 HASH => error!(
                     &self.lexer,
-                    "Unexpected '#'. Use #[python] ... #[endpython] for raw Python blocks."
+                    "Unexpected '#'. Use #name(...) for attribute macros or #[python] ... #[endpython] for raw Python blocks."
                 ),
 
                 // * Signal / Reactive Statement

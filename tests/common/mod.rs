@@ -3,6 +3,7 @@
 use lang::{
     ast::{Node, AST},
     lexer::{Kind, Lexer},
+    macros::{expand_source_tokens, MacroError},
     parser::Parser,
     transpilers::python_transpiler::Transpiler,
 };
@@ -28,6 +29,15 @@ pub fn lex_kinds(source: &str) -> Vec<Kind> {
     }
 
     kinds
+}
+
+pub fn expand_tokens(source: &str) -> Result<Vec<(String, String)>, MacroError> {
+    expand_source_tokens(source).map(|tokens| {
+        tokens
+            .into_iter()
+            .map(|token| (format!("{:?}", token.kind), token.value))
+            .collect()
+    })
 }
 
 pub fn parse_ast(source: &str) -> AST {
