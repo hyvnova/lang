@@ -24,6 +24,18 @@ fn parses_member_assignment_as_member_access_lhs() {
 }
 
 #[test]
+fn parses_member_access_expression_shape() {
+    let nodes = parse_nodes("counter.value");
+
+    let Node::MemberAccess { object, member } = &nodes[0] else {
+        panic!("expected member access, got {:#?}", nodes);
+    };
+
+    assert!(matches!(object.as_ref(), Node::Identifier(name) if name == "counter"));
+    assert!(matches!(member.as_ref(), Node::Identifier(name) if name == "value"));
+}
+
+#[test]
 fn parses_range_distribution_with_range_as_distribution_arg() {
     let nodes = parse_nodes("1..10 -> print");
 

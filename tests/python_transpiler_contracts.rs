@@ -43,6 +43,19 @@ print(add(2, 4))
 }
 
 #[test]
+fn generated_python_runs_basic_literals_and_comments() {
+    assert_python_runs(
+        r#"
+// literal smoke test
+flag = true
+message = "ok"
+if flag == true { print(message) } else { print("no") }
+"#,
+        "ok",
+    );
+}
+
+#[test]
 fn generated_python_runs_loop_over_range() {
     assert_python_runs(
         r#"
@@ -65,5 +78,44 @@ $a = 2
 print($b)
 "#,
         "2\n3",
+    );
+}
+
+#[test]
+fn generated_python_runs_arrays_and_indexing() {
+    assert_python_runs(
+        r#"
+values = [1, 2, 3]
+print(values[1])
+"#,
+        "2",
+    );
+}
+
+#[test]
+fn generated_python_runs_lambda_calls() {
+    assert_python_runs(
+        r#"
+value = 2
+print(((n) => n + 1)(value))
+"#,
+        "3",
+    );
+}
+
+#[test]
+fn generated_python_runs_raw_python_interop() {
+    assert_python_runs(
+        r#"
+#[python]
+class Counter:
+    def __init__(self, value):
+        self.value = value
+#[endpython]
+
+counter = Counter(5)
+print(counter.value)
+"#,
+        "5",
     );
 }
