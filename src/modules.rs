@@ -9,6 +9,8 @@ use crate::ast::{AST, ImportName, ModulePath, Node};
 use crate::parser::Parser;
 use crate::transpilers::python_transpiler::Transpiler;
 
+const MODULE_STR_BINDING: &str = "__module_str__";
+
 #[derive(Debug, Clone)]
 pub struct ModuleError {
     pub message: String,
@@ -342,6 +344,16 @@ impl ProjectBuilder {
                 | Node::StructDef { name, public, .. }
                 | Node::TraitDef { name, public, .. }
                 | Node::BindingDef { name, public, .. } => {
+                    if name == MODULE_STR_BINDING {
+                        if public {
+                            return Err(ModuleError::new(format!(
+                                "'{}' is reserved for private module display metadata.",
+                                MODULE_STR_BINDING
+                            )));
+                        }
+                        continue;
+                    }
+
                     if public {
                         insert_export(&mut exports, &module.id, &name, ExportKind::Local)?;
                     }
@@ -482,13 +494,15 @@ impl ProjectBuilder {
                 let target = self.resolve_module_path(module, path)?;
                 let target_id = target.join(".");
                 let target_module = self.module(&target_id)?;
+                let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &target_id);
                 let alias = alias
                     .clone()
                     .or_else(|| path.last_segment().cloned())
                     .ok_or_else(|| ModuleError::new("import requires a target module name."))?;
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", target_module.python_name, alias)),
+                    import_line: Some(format!("import {} as {}", target_module.python_name, hidden_alias)),
+                    extra_lines: vec![wrap_module_line(&alias, &hidden_alias, &target_module.python_name)],
                     ..ResolvedNodeEffect::default()
                 })
             }
@@ -496,9 +510,11 @@ impl ProjectBuilder {
                 let child_path = self.resolve_child_module_path(module, name)?;
                 let child_id = module_id_from_path(&self.root, &child_path)?;
                 let child_module = self.module(&child_id)?;
+                let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &child_id);
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", child_module.python_name, name)),
+                    import_line: Some(format!("import {} as {}", child_module.python_name, hidden_alias)),
+                    extra_lines: vec![wrap_module_line(name, &hidden_alias, &child_module.python_name)],
                     ..ResolvedNodeEffect::default()
                 })
             }
@@ -643,6 +659,20 @@ impl ProjectBuilder {
 
     fn absolute_segments(&self, module: &ModuleRecord, path: &ModulePath) -> Result<Vec<String>, ModuleError> {
         if path.relative_level == 0 {
+            if path.segments.len() == 1 {
+                let mut sibling_segments = module.package_segments.clone();
+                sibling_segments.extend(path.segments.clone());
+                if self.locate_module_file(&sibling_segments).is_ok() {
+                    return Ok(sibling_segments);
+                }
+
+                if self.explicit_root && self.locate_module_file(&path.segments).is_ok() {
+                    return Ok(path.segments.clone());
+                }
+
+                return Ok(sibling_segments);
+            }
+
             if !self.explicit_root {
                 return Err(ModuleError::new(format!(
                     "Absolute import '{}' requires an explicit project root.",
@@ -1185,6 +1215,10 @@ fn ensure_unique_binding(
     }
     all_bindings.insert(local_name.to_string(), binding.clone());
     Ok(())
+}
+
+fn wrap_module_line(local_name: &str, raw_alias: &str, module_name: &str) -> String {
+    format!("{local_name} = __lang_wrap_module__({raw_alias}, \"{module_name}\")")
 }
 
 fn insert_export(

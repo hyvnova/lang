@@ -184,6 +184,30 @@ pub fn assert_project_runs(
     assert_eq!(stdout.trim(), expected_stdout);
 }
 
+pub fn assert_project_runtime_error(
+    files: &[(&str, &str)],
+    entry: &str,
+    expected_fragment: &str,
+) {
+    let (root, entry_path) = build_temp_project(files, entry);
+    let output = run_project(entry_path, Some(root)).expect("project run should complete");
+
+    assert!(
+        !output.status.success(),
+        "Project run unexpectedly succeeded.\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+    assert!(
+        stderr.contains(expected_fragment),
+        "expected runtime error containing '{}', got stderr:\n{}",
+        expected_fragment,
+        stderr
+    );
+}
+
 pub fn assert_project_build_error(
     files: &[(&str, &str)],
     entry: &str,

@@ -1,7 +1,8 @@
 mod common;
 
 use common::{
-    assert_project_build_error, assert_project_runs, build_project_fixture, build_temp_project,
+    assert_project_build_error, assert_project_runs, assert_project_runtime_error,
+    build_project_fixture, build_temp_project,
 };
 use lang::modules::build_project;
 
@@ -234,4 +235,153 @@ from app.math.vec import value
         .expect_err("absolute imports should require an explicit root");
 
     assert!(error.message.contains("requires an explicit project root"));
+}
+
+#[test]
+fn bare_single_segment_imports_resolve_to_sibling_modules() {
+    assert_project_runs(
+        &[
+            (
+                "util.lang",
+                r#"
+pub value = 1
+"#,
+            ),
+            (
+                "main.lang",
+                r#"
+import util
+print(util)
+print(util.value)
+util.value = 7
+print(util)
+print(util.value)
+"#,
+            ),
+        ],
+        "main.lang",
+        "<module util>\n1\n<module util>\n7",
+    );
+}
+
+#[test]
+fn bare_single_segment_imports_prefer_sibling_modules_over_root_modules() {
+    assert_project_runs(
+        &[
+            (
+                "util.lang",
+                r#"
+pub value = 0
+"#,
+            ),
+            (
+                "app/util.lang",
+                r#"
+pub value = 1
+"#,
+            ),
+            (
+                "app/main.lang",
+                r#"
+import util
+print(util)
+print(util.value)
+"#,
+            ),
+        ],
+        "app/main.lang",
+        "<module app.util>\n1",
+    );
+}
+
+#[test]
+fn module_display_uses_private_module_string_binding() {
+    assert_project_runs(
+        &[
+            (
+                "util.lang",
+                r#"
+__module_str__ = "utility"
+pub value = 1
+"#,
+            ),
+            (
+                "main.lang",
+                r#"
+import util
+print(util)
+"#,
+            ),
+        ],
+        "main.lang",
+        "utility",
+    );
+}
+
+#[test]
+fn module_display_rejects_non_string_override_values() {
+    assert_project_runtime_error(
+        &[
+            (
+                "util.lang",
+                r#"
+__module_str__ = 42
+"#,
+            ),
+            (
+                "main.lang",
+                r#"
+import util
+print(util)
+"#,
+            ),
+        ],
+        "main.lang",
+        "__module_str__ must be str",
+    );
+}
+
+#[test]
+fn rejects_public_module_display_metadata_bindings() {
+    assert_project_build_error(
+        &[
+            (
+                "util.lang",
+                r#"
+pub __module_str__ = "bad"
+"#,
+            ),
+            (
+                "main.lang",
+                r#"
+import util
+"#,
+            ),
+        ],
+        "main.lang",
+        "reserved for private module display metadata",
+    );
+}
+
+#[test]
+fn rejects_importing_private_module_display_metadata() {
+    assert_project_build_error(
+        &[
+            (
+                "util.lang",
+                r#"
+__module_str__ = "utility"
+pub value = 1
+"#,
+            ),
+            (
+                "main.lang",
+                r#"
+from util import __module_str__
+"#,
+            ),
+        ],
+        "main.lang",
+        "does not publicly export '__module_str__'",
+    );
 }
