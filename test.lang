@@ -1,8 +1,4 @@
-#derive(debug)
-struct Square {
-    w: int,
-    h: int,
-}
+import util
+print(util.Square)
 
-s = Square { w: 10, h: 20 }
-print(s)
+

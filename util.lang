@@ -1,0 +1,7 @@
+#derive(debug)
+struct Square {
+    w: int,
+    h: int,
+}
+
+s = Square { w: 10, h: 20 }
