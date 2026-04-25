@@ -6,6 +6,7 @@ These docs are the **official syntax reference** for the **tested** language sur
 
 ## Reference
 
+- [Project Manifest](./manifest.md)
 - [Expressions](./syntax/expressions.md)
 - [Control Flow](./syntax/control-flow.md)
 - [Modules](./syntax/modules.md)
@@ -24,5 +25,6 @@ The tests currently cover:
 
 - tokenization for core syntax and object keywords
 - parser shape for precedence, member access, member assignment, and range distribution
+- manifest discovery, parsing, validation, and CLI precedence
 - module loading, sibling bare imports, visibility, re-exports, module display, import-cycle errors, and live imported bindings
 - Python transpilation and runtime behavior for functions, loops, signals, arrays, lambdas, raw Python interop, Rust-like objects, and `#derive(debug)`

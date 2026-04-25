@@ -62,7 +62,7 @@ pub value = 1
 - `pub mod child` is valid only in `mod.lang`. It must match a real child file or package.
 - `pub use` adds a name to the current module's public export table. Wildcard imports include only those public exports.
 - A single-name import such as `import util` resolves the sibling module first. If no sibling exists and the project root is explicit, the top-level module with that name is used.
-- Absolute imports such as `from app.math.vec import value` require an explicit project root in the CLI/build entrypoint.
+- Absolute imports such as `from app.math.vec import value` require an explicit project root. That can come from `--project-root` or from `lang.toml`.
 - Imported names are live bindings. Reading an imported name reads the exporter module binding, and assigning to that imported name updates the exporter binding.
 - `import path as alias` binds the module object, so `alias.value = 8` updates the same exporter state as a direct imported binding.
 - Imported modules print as `<module package.module>` by default.
