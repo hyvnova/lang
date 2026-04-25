@@ -10,7 +10,7 @@ use lang::{
 };
 use rand::random;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn lex(source: &str) -> Vec<(String, String)> {
@@ -220,4 +220,12 @@ pub fn assert_project_build_error(
         expected_fragment,
         error.message
     );
+}
+
+pub fn run_lang_binary(cwd: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_lang"))
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("failed to run lang binary")
 }

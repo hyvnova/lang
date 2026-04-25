@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 
 pub mod cli;
+pub mod config;
 
 pub mod parse_utils;
 

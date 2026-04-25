@@ -1,0 +1,6 @@
+[project]
+root = "."
+entry = "test.lang"
+
+[run]
+transpiler = "python"

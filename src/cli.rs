@@ -1,5 +1,10 @@
 use crate::{
-    log_utils::add_line_numbers, modules, parser::Parser as LangParser, transpilers, use_transpiler,
+    config::{self, ConfigError},
+    log_utils::add_line_numbers,
+    modules,
+    parser::Parser as LangParser,
+    transpilers,
+    use_transpiler,
 };
 use std::path::PathBuf;
 
@@ -10,7 +15,7 @@ use clap::{Parser, Subcommand};
 struct Args {
     /// Action to perform.
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -21,14 +26,14 @@ enum Commands {
     // ```
     Run {
         // File to run
-        file: PathBuf,
+        file: Option<PathBuf>,
 
         /// Project root used for absolute module imports.
         #[arg(long)]
         project_root: Option<PathBuf>,
 
         // Transpiler to use
-        #[arg(short, long, default_value = "python")]
+        #[arg(short, long)]
         transpiler: Option<String>,
     },
 
@@ -50,24 +55,43 @@ pub fn main() {
     let args = Args::parse();
 
     match args.command {
-        Commands::Run { file, project_root, transpiler } => {
-            if transpiler.as_deref() != Some("python") {
-                panic!("Only the python transpiler supports modules right now.");
+        Some(Commands::Run { file, project_root, transpiler }) => {
+            match run_project_command(file, project_root, transpiler) {
+                Ok(output) => exit_with_output(output),
+                Err(error) => exit_with_error(error),
             }
-
-            let output = modules::run_project(file, project_root)
-                .unwrap_or_else(|error| panic!("{}", error));
-
-            print!("{}", String::from_utf8_lossy(&output.stdout));
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(output.status.code().unwrap_or(1));
         }
 
-        Commands::Eval { code, transpiler } => {
+        Some(Commands::Eval { code, transpiler }) => {
             let parser = LangParser::new(code);
-            run_lang(parser, transpiler.unwrap());
+            run_lang(parser, transpiler.unwrap_or_else(|| "python".to_string()));
+        }
+        None => {
+            match run_manifest_from_cwd() {
+                Ok(output) => exit_with_output(output),
+                Err(error) => exit_with_error(error),
+            }
         }
     }
+}
+
+pub fn run_manifest_from_cwd() -> Result<std::process::Output, ConfigError> {
+    run_project_command(None, None, None)
+}
+
+fn run_project_command(
+    file: Option<PathBuf>,
+    project_root: Option<PathBuf>,
+    transpiler: Option<String>,
+) -> Result<std::process::Output, ConfigError> {
+    let cwd = std::env::current_dir().map_err(|error| {
+        ConfigError::new(format!("Failed to get current directory: {error}"))
+    })?;
+    let resolved = config::resolve_run_config(file, project_root, transpiler, &cwd)?;
+
+    modules::run_project(resolved.entry_file, resolved.project_root).map_err(|error| {
+        ConfigError::new(error.message)
+    })
 }
 
 fn run_lang(mut parser: LangParser, transpiler: String) {
@@ -90,4 +114,15 @@ fn run_lang(mut parser: LangParser, transpiler: String) {
         .expect("failed to execute process");
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn exit_with_output(output: std::process::Output) -> ! {
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    std::process::exit(output.status.code().unwrap_or(1));
+}
+
+fn exit_with_error(error: ConfigError) -> ! {
+    eprintln!("{}", error);
+    std::process::exit(1);
 }
