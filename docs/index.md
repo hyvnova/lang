@@ -24,5 +24,5 @@ The tests currently cover:
 
 - tokenization for core syntax and object keywords
 - parser shape for precedence, member access, member assignment, and range distribution
-- module loading, visibility, re-exports, import-cycle errors, and live imported bindings
+- module loading, sibling bare imports, visibility, re-exports, module display, import-cycle errors, and live imported bindings
 - Python transpilation and runtime behavior for functions, loops, signals, arrays, lambdas, raw Python interop, Rust-like objects, and `#derive(debug)`
