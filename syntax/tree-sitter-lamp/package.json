@@ -1,0 +1,8 @@
+{
+  "name": "tree-sitter-lamp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local Tree-sitter grammar for the Lamp language",
+  "license": "UNLICENSED",
+  "type": "commonjs"
+}

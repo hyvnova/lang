@@ -1,0 +1,58 @@
+// Canonical surface fixture for syntax coverage checks.
+#[python]
+import math
+#[endpython]
+
+mod toys
+use std.fs as fs
+from std.iter import range
+
+pub struct User {
+    name: str,
+    score: int,
+}
+
+pub trait Render {
+    fn render(self) -> str
+}
+
+impl Render for User {
+    fn render(self) -> str {
+        self.name + ":" + str(self.score)
+    }
+}
+
+fn fib(n: int) -> int {
+    a = 0
+    b = 1
+    for i in 0..n {
+        next = a + b
+        a = b
+        b = next
+    }
+    a
+}
+
+items = [1, 2, 3]
+labels = { one: 1, "two": 2 }
+double = (value) => value * 2
+debugged = "lamp"
+    .tap((text) => {
+        text
+    })
+    .pipe((text) => text.upper())
+count = debugged.len
+1..3 -> print
+|> items -> print
+
+$count = len(items)
+$ { print(std.term.bold("changed")) }
+
+if std.fs.exists("input.txt") {
+    text = std.fs.read_text("input.txt").unwrap_or("")
+    std.io.println(std.text.upper(text))
+} elif fib(3) == 2 {
+    print(User { name: "Ada", score: 42 }.render())
+} else {
+    std.io.print("done")
+}

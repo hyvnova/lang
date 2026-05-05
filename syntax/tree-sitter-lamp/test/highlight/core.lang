@@ -1,0 +1,22 @@
+fn add(a, b) { a + b }
+// <- keyword
+   // <- function
+       // <- variable.parameter
+
+pub struct User<T> {
+// <- keyword
+           // <- type
+  name: str,
+  // <- property
+        // <- type
+}
+
+$a = 1
+// <- operator
+
+#[python]
+// <- keyword.directive
+print("ok")
+      // <- string
+#[endpython]
+// <- keyword.directive

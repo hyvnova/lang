@@ -1,0 +1,3 @@
+entry = "main.lang"
+stdin = "9\n"
+expected_stdout = "34\n"

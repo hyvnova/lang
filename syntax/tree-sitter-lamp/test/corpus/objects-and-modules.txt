@@ -1,0 +1,111 @@
+==================
+Objects and modules
+==================
+
+#derive(debug)
+pub struct User<T> {
+  name: str,
+  age: int,
+}
+
+trait Named<T> {
+  fn label(self) -> str
+}
+
+impl<T> Named<T> for User<T> {
+  fn label(self) -> str {
+    self.name
+  }
+}
+
+pub mod math
+import .math.vec as vec
+from app.math import value, Vec2
+pub use app.math.vec.Vec2
+pub answer = 42
+
+---
+
+(source_file
+  (attribute_item
+    (attribute_macro
+      name: (identifier)
+      arguments: (argument_list
+        (argument
+          (identifier))))
+    (struct_definition
+      name: (identifier)
+      type_parameters: (type_parameters
+        (identifier))
+      body: (struct_body
+        (struct_field
+          name: (identifier)
+          type: (type_ref
+            name: (identifier)))
+        (struct_field
+          name: (identifier)
+          type: (type_ref
+            name: (identifier))))))
+  (trait_definition
+    name: (identifier)
+    type_parameters: (type_parameters
+      (identifier))
+    body: (trait_body
+      (trait_method_signature
+        name: (identifier)
+        parameters: (parameter_list
+          (parameter
+            name: (identifier)))
+        (return_type
+          (type_ref
+            name: (identifier))))))
+  (impl_block
+    type_parameters: (type_parameters
+      (identifier))
+    trait: (type_ref
+      name: (identifier)
+      type_arguments: (type_arguments
+        (type_ref
+          name: (identifier))))
+    target: (type_ref
+      name: (identifier)
+      type_arguments: (type_arguments
+        (type_ref
+          name: (identifier))))
+    body: (impl_body
+      (method_definition
+        name: (identifier)
+        parameters: (parameter_list
+          (parameter
+            name: (identifier)))
+        (return_type
+          (type_ref
+            name: (identifier)))
+        body: (block
+          (member_expression
+            object: (identifier)
+            property: (identifier))))))
+  (module_declaration
+    name: (identifier))
+  (import_statement
+    path: (module_path
+      head: (identifier)
+      (identifier))
+    alias: (identifier))
+  (from_import_statement
+    path: (module_path
+      head: (identifier)
+      (identifier))
+    (import_name
+      name: (identifier))
+    (import_name
+      name: (identifier)))
+  (use_declaration
+    path: (module_path
+      head: (identifier)
+      (identifier)
+      (identifier)
+      (identifier)))
+  (binding_definition
+    name: (identifier)
+    value: (number)))

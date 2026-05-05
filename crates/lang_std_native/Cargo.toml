@@ -1,0 +1,12 @@
+[package]
+name = "lang_std_native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lang_std_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.22.6", features = ["abi3-py310", "extension-module"] }
+rand = "0.8.5"

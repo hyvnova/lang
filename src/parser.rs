@@ -1,13 +1,16 @@
 use core::panic;
-use std::{ fs, path::PathBuf, vec };
+use std::{fs, path::PathBuf, vec};
 
 use crate::{
-    ast::{ FunctionParam, FunctionSignature, ImplMethod, ImportName, ModulePath, Node, StructField, TypeRef, AST },
+    ast::{
+        FunctionParam, FunctionSignature, ImplMethod, ImportName, ModulePath, Node, StructField,
+        TypeRef, AST,
+    },
     error,
-    lexer::{ Kind, Lexer, Token },
+    lexer::{Kind, Lexer, Token},
     log,
-    macros::{ expand_tokens, MacroError },
-    parse_utils::{ GetFirstOrElse, IsKind },
+    macros::{expand_tokens, MacroError},
+    parse_utils::{GetFirstOrElse, IsKind},
     signal::clean_signals,
 };
 
@@ -28,11 +31,21 @@ const EXPR_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE];
 /// Like EXPR_END, but allows finishing an expression at the end of a block.
 const EXPR_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_BRACKET];
 const RANGE_END: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_ARROW];
-const RANGE_END_OR_R_BRACKET: &[Kind] = &[Kind::SEMICOLON, Kind::NEW_LINE, Kind::R_BRACKET, Kind::R_ARROW];
+const RANGE_END_OR_R_BRACKET: &[Kind] = &[
+    Kind::SEMICOLON,
+    Kind::NEW_LINE,
+    Kind::R_BRACKET,
+    Kind::R_ARROW,
+];
 const RANGE_END_OR_L_BRACKET: &[Kind] = &[Kind::L_BRACKET, Kind::R_ARROW];
 const RANGE_END_OR_R_PARENT: &[Kind] = &[Kind::R_PARENT, Kind::R_ARROW];
 const RANGE_END_OR_R_SQUARE_BRACKET: &[Kind] = &[Kind::R_SQUARE_BRACKET, Kind::R_ARROW];
-const FIELD_VALUE_END: &[Kind] = &[Kind::COMMA, Kind::R_BRACKET, Kind::NEW_LINE, Kind::SEMICOLON];
+const FIELD_VALUE_END: &[Kind] = &[
+    Kind::COMMA,
+    Kind::R_BRACKET,
+    Kind::NEW_LINE,
+    Kind::SEMICOLON,
+];
 
 pub struct Parser<'stop_arr> {
     // Token that was read but not processed
@@ -99,6 +112,7 @@ impl<'stop_arr> Parser<'stop_arr> {
                 Err(error) => Self::raise_macro_error(&source, error),
             }
         };
+        let tokens = Self::remove_method_chain_newlines(tokens);
 
         let lexer = Lexer::new(source);
 
@@ -125,8 +139,7 @@ impl<'stop_arr> Parser<'stop_arr> {
     }
 
     pub fn from_path(source_file: PathBuf) -> Self {
-        let source: String = fs
-            ::read_to_string(&source_file)
+        let source: String = fs::read_to_string(&source_file)
             .expect(&format!("Couldn't read file: {:?}", source_file));
 
         Parser::new(source)
@@ -170,6 +183,22 @@ impl<'stop_arr> Parser<'stop_arr> {
         error!(&lexer, error.message)
     }
 
+    fn remove_method_chain_newlines(tokens: Vec<Token>) -> Vec<Token> {
+        let mut out = Vec::new();
+        for (index, token) in tokens.iter().enumerate() {
+            if token.kind == Kind::NEW_LINE
+                && tokens
+                    .get(index + 1)
+                    .map(|next| next.kind == Kind::DOT)
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            out.push(token.clone());
+        }
+        out
+    }
+
     /// Returns the next token without consuming it
     /// (It consumes the token but put's it back)
     fn peek_token(&mut self) -> Option<Token> {
@@ -196,6 +225,10 @@ impl<'stop_arr> Parser<'stop_arr> {
             self.prefer_expr_end = true;
         }
 
+        if stop_at.is_some() {
+            self.prefer_expr_end = false;
+        }
+
         if let Some(stop_at) = stop_at {
             self.stops.push(stop_at);
         }
@@ -215,11 +248,12 @@ impl<'stop_arr> Parser<'stop_arr> {
         }
         log!("- END PARSE UNTIL", "Stopped at: {:?}", self.stopped_at);
 
-        let scope: Vec<Node> = self.ast
-            .pop_scope()
-            .unwrap_or_else(|| {
-                error!(&self.lexer, "No scope found. Probably scope was popped by another handler.")
-            });
+        let scope: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
+            error!(
+                &self.lexer,
+                "No scope found. Probably scope was popped by another handler."
+            )
+        });
 
         Self::normalize_scope(scope)
     }
@@ -264,24 +298,27 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Returns a BinOp node
     fn parse_binop(&mut self, current_stop: Option<&'stop_arr [Kind]>, op: String) {
         // LHS should be the last node in the scope
-        let lhs: Node = self.ast
+        let lhs: Node = self
+            .ast
             .pop_node()
-            .unwrap_or_else(|| { error!(&self.lexer, "Expected an Node before binary operator.") });
+            .unwrap_or_else(|| error!(&self.lexer, "Expected an Node before binary operator."));
 
         log!("PARSE BINOP", "LHS: {:?} {:?}", lhs, op);
 
         // Parse RHS
         let rhs: Node = self
             .parse_until(current_stop)
-            .get_first_or_else(|| {
-                error!(&self.lexer, "Expected an Node after binary operator.")
-            });
+            .get_first_or_else(|| error!(&self.lexer, "Expected an Node after binary operator."));
 
         // We don't consume stop token because this handlers doens't sets any.
 
         log!("PARSE BINOP", "RHS: {:?}", rhs);
 
-        self.ast.add_node(Node::BinOp { lhs: bi!(lhs), op, rhs: bi!(rhs) });
+        self.ast.add_node(Node::BinOp {
+            lhs: bi!(lhs),
+            op,
+            rhs: bi!(rhs),
+        });
     }
 
     /// Parses a block.
@@ -292,7 +329,11 @@ impl<'stop_arr> Parser<'stop_arr> {
         log!("PARSE BLOCK");
 
         // If next token is a closing bracket, it's an empty block
-        if let Some(Token { kind: Kind::R_BRACKET, .. }) = self.peek_token() {
+        if let Some(Token {
+            kind: Kind::R_BRACKET,
+            ..
+        }) = self.peek_token()
+        {
             self.next_token(); // Consume R_BRACKET
             return Node::Block(Vec::new());
         }
@@ -351,7 +392,11 @@ impl<'stop_arr> Parser<'stop_arr> {
     /// Skips newlines.
     /// Consumes tokens until a token that is not a newline is found.
     fn skip_newlines(&mut self) {
-        while let Some(Token { kind: Kind::NEW_LINE, .. }) = self.peek_token() {
+        while let Some(Token {
+            kind: Kind::NEW_LINE,
+            ..
+        }) = self.peek_token()
+        {
             self.next_token();
         }
     }
@@ -392,14 +437,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                 if self.capturing_sequence {
                     self.capturing_sequence = false;
 
-                    let seq: Vec<Node> = self.ast
-                        .pop_scope()
-                        .unwrap_or_else(|| {
-                            error!(
-                                &self.lexer,
-                                "No scope found. Probably scope was popped by another handler."
-                            )
-                        });
+                    let seq: Vec<Node> = self.ast.pop_scope().unwrap_or_else(|| {
+                        error!(
+                            &self.lexer,
+                            "No scope found. Probably scope was popped by another handler."
+                        )
+                    });
 
                     self.ast.add_node(Node::Sequence(seq));
                 }
@@ -1309,7 +1352,11 @@ impl<'stop_arr> Parser<'stop_arr> {
                 values: Self::normalize_scope(values),
             },
             Node::Alias(value) => Node::Alias(bi!(Self::normalize_node(*value))),
-            Node::Range { start, end, inclusive } => Node::Range {
+            Node::Range {
+                start,
+                end,
+                inclusive,
+            } => Node::Range {
                 start: bi!(Self::normalize_node(*start)),
                 end: bi!(Self::normalize_node(*end)),
                 inclusive,
@@ -1331,7 +1378,12 @@ impl<'stop_arr> Parser<'stop_arr> {
                 args: bi!(Self::normalize_node(*args)),
                 body: bi!(Self::normalize_node(*body)),
             },
-            Node::Conditional { condition, body, elifs, else_body } => Node::Conditional {
+            Node::Conditional {
+                condition,
+                body,
+                elifs,
+                else_body,
+            } => Node::Conditional {
                 condition: bi!(Self::normalize_node(*condition)),
                 body: bi!(Self::normalize_node(*body)),
                 elifs: elifs
@@ -1343,57 +1395,113 @@ impl<'stop_arr> Parser<'stop_arr> {
                 else_body: else_body.map(|body| bi!(Self::normalize_node(*body))),
             },
             Node::ImportStmt { path, alias } => Node::ImportStmt { path, alias },
-            Node::FromImport { path, names, wildcard } => Node::FromImport {
+            Node::FromImport {
+                path,
+                names,
+                wildcard,
+            } => Node::FromImport {
                 path,
                 names,
                 wildcard,
             },
-            Node::UseDecl { path, alias, public } => Node::UseDecl { path, alias, public },
+            Node::UseDecl {
+                path,
+                alias,
+                public,
+            } => Node::UseDecl {
+                path,
+                alias,
+                public,
+            },
             Node::ModuleDecl { name, public } => Node::ModuleDecl { name, public },
-            Node::BindingDef { name, value, public } => Node::BindingDef {
+            Node::BindingDef {
+                name,
+                value,
+                public,
+            } => Node::BindingDef {
                 name,
                 value: bi!(Self::normalize_node(*value)),
                 public,
             },
-            Node::Assign { identifiers, values, op } => Node::Assign {
+            Node::Assign {
+                identifiers,
+                values,
+                op,
+            } => Node::Assign {
                 identifiers: Self::normalize_scope(identifiers),
                 values: Self::normalize_scope(values),
                 op,
             },
-            Node::SignalDef { name, value, dependencies } => Node::SignalDef {
+            Node::SignalDef {
+                name,
+                value,
+                dependencies,
+            } => Node::SignalDef {
                 name,
                 value: bi!(Self::normalize_node(*value)),
                 dependencies,
             },
-            Node::SignalUpdate { name, value, dependencies } => Node::SignalUpdate {
+            Node::SignalUpdate {
+                name,
+                value,
+                dependencies,
+            } => Node::SignalUpdate {
                 name,
                 value: bi!(Self::normalize_node(*value)),
                 dependencies,
             },
-            Node::Deconstruction { identifiers, value, default_values } => Node::Deconstruction {
+            Node::Deconstruction {
+                identifiers,
+                value,
+                default_values,
+            } => Node::Deconstruction {
                 identifiers: Self::normalize_scope(identifiers),
                 value: bi!(Self::normalize_node(*value)),
                 default_values: Self::normalize_scope(default_values),
             },
-            Node::FunctionDef { name, args, body, public } => Node::FunctionDef {
+            Node::FunctionDef {
+                name,
+                args,
+                params,
+                return_type,
+                body,
+                public,
+            } => Node::FunctionDef {
                 name,
                 args: bi!(Self::normalize_node(*args)),
+                params,
+                return_type,
                 body: bi!(Self::normalize_node(*body)),
                 public,
             },
-            Node::StructDef { name, generics, fields, public } => Node::StructDef {
+            Node::StructDef {
+                name,
+                generics,
+                fields,
+                public,
+            } => Node::StructDef {
                 name,
                 generics,
                 fields,
                 public,
             },
-            Node::TraitDef { name, generics, methods, public } => Node::TraitDef {
+            Node::TraitDef {
+                name,
+                generics,
+                methods,
+                public,
+            } => Node::TraitDef {
                 name,
                 generics,
                 methods,
                 public,
             },
-            Node::ImplBlock { generics, trait_ref, target, methods } => Node::ImplBlock {
+            Node::ImplBlock {
+                generics,
+                trait_ref,
+                target,
+                methods,
+            } => Node::ImplBlock {
                 generics,
                 trait_ref,
                 target,
@@ -1412,12 +1520,19 @@ impl<'stop_arr> Parser<'stop_arr> {
                     .map(|(name, value)| (name, Self::normalize_node(value)))
                     .collect(),
             },
-            Node::ReactiveStmt { block, dependencies } => Node::ReactiveStmt {
+            Node::ReactiveStmt {
+                block,
+                dependencies,
+            } => Node::ReactiveStmt {
                 block: Self::normalize_scope(block),
                 dependencies,
             },
             Node::Loop(body) => Node::Loop(bi!(Self::normalize_node(*body))),
-            Node::ForLoop { item, iterable, body } => Node::ForLoop {
+            Node::ForLoop {
+                item,
+                iterable,
+                body,
+            } => Node::ForLoop {
                 item: bi!(Self::normalize_node(*item)),
                 iterable: bi!(Self::normalize_node(*iterable)),
                 body: bi!(Self::normalize_node(*body)),
@@ -1434,7 +1549,12 @@ impl<'stop_arr> Parser<'stop_arr> {
         let lhs = Self::normalize_node(lhs);
         let rhs = Self::normalize_node(rhs);
 
-        if let Node::BinOp { lhs: rhs_lhs, op: rhs_op, rhs: rhs_rhs } = rhs {
+        if let Node::BinOp {
+            lhs: rhs_lhs,
+            op: rhs_op,
+            rhs: rhs_rhs,
+        } = rhs
+        {
             if Self::should_rotate_binop(&op, &rhs_op) {
                 let rotated_lhs = Node::BinOp {
                     lhs: bi!(lhs),
@@ -1448,11 +1568,19 @@ impl<'stop_arr> Parser<'stop_arr> {
             return Node::BinOp {
                 lhs: bi!(lhs),
                 op,
-                rhs: bi!(Node::BinOp { lhs: rhs_lhs, op: rhs_op, rhs: rhs_rhs }),
+                rhs: bi!(Node::BinOp {
+                    lhs: rhs_lhs,
+                    op: rhs_op,
+                    rhs: rhs_rhs
+                }),
             };
         }
 
-        Node::BinOp { lhs: bi!(lhs), op, rhs: bi!(rhs) }
+        Node::BinOp {
+            lhs: bi!(lhs),
+            op,
+            rhs: bi!(rhs),
+        }
     }
 
     fn should_rotate_binop(left_op: &str, right_op: &str) -> bool {
@@ -1479,9 +1607,9 @@ impl<'stop_arr> Parser<'stop_arr> {
     }
 
     fn parse_public_item(&mut self) -> Node {
-        let token = self.next_token().unwrap_or_else(|| {
-            error!(&self.lexer, "Expected an item after 'pub'.")
-        });
+        let token = self
+            .next_token()
+            .unwrap_or_else(|| error!(&self.lexer, "Expected an item after 'pub'."));
 
         match token.kind {
             Kind::FN_DEF => self.parse_function_def(true),
@@ -1498,36 +1626,22 @@ impl<'stop_arr> Parser<'stop_arr> {
     }
 
     fn parse_function_def(&mut self, public: bool) -> Node {
-        let ident_scope: Node = self
-            .parse_until(Some(&[Kind::L_PARENT]))
-            .get_first_or_else(|| {
-                error!(&self.lexer, "Expected an identifier for function name.")
-            });
-
-        if self.next_token().is_not(Kind::L_PARENT) {
-            error!(&self.lexer, "Expected a parenthesis after function name.");
-        }
-
-        log!("FN_DEF", "Ident Scope: {:?}", ident_scope);
-        self.clean_stop();
-
-        let name: String = match ident_scope {
-            Node::Identifier(name) => name,
-            other =>
-                error!(
-                    &self.lexer,
-                    format!("Expected an identifier for function name. Got: {:?}", other)
-                ),
-        };
-
-        let args: Box<Node> = bi!(self.parse_paren());
+        let signature = self.parse_function_signature();
+        let args: Box<Node> = bi!(function_args_from_params(&signature.params));
 
         if self.next_token().is_not(Kind::L_BRACKET) {
             error!(&self.lexer, "Expected a block after function arguments.");
         }
 
         let body: Box<Node> = bi!(self.parse_block(true));
-        Node::FunctionDef { name, args, body, public }
+        Node::FunctionDef {
+            name: signature.name,
+            args,
+            params: signature.params,
+            return_type: signature.return_type,
+            body,
+            public,
+        }
     }
 
     fn parse_import_stmt(&mut self) -> Node {
@@ -1544,7 +1658,10 @@ impl<'stop_arr> Parser<'stop_arr> {
 
     fn parse_from_import(&mut self) -> Node {
         let path = self.parse_module_path();
-        self.expect_token(Kind::IMPORT, "Expected 'import' after module path in from-import.");
+        self.expect_token(
+            Kind::IMPORT,
+            "Expected 'import' after module path in from-import.",
+        );
 
         let mut names = Vec::new();
         let wildcard = if self.peek_token().is(Kind::MULTIPLY) {
@@ -1569,7 +1686,11 @@ impl<'stop_arr> Parser<'stop_arr> {
             false
         };
 
-        Node::FromImport { path, names, wildcard }
+        Node::FromImport {
+            path,
+            names,
+            wildcard,
+        }
     }
 
     fn parse_use_decl(&mut self, public: bool) -> Node {
@@ -1581,7 +1702,11 @@ impl<'stop_arr> Parser<'stop_arr> {
             None
         };
 
-        Node::UseDecl { path, alias, public }
+        Node::UseDecl {
+            path,
+            alias,
+            public,
+        }
     }
 
     fn parse_module_decl(&mut self, public: bool) -> Node {
@@ -1620,12 +1745,20 @@ impl<'stop_arr> Parser<'stop_arr> {
             let field_name = self.parse_identifier_name("Expected a field name in struct body.");
             self.expect_token(Kind::COLON, "Expected ':' after struct field name.");
             let type_ref = self.parse_type_ref();
-            fields.push(StructField { name: field_name, type_ref });
+            fields.push(StructField {
+                name: field_name,
+                type_ref,
+            });
 
             self.consume_decl_separator();
         }
 
-        Node::StructDef { name, generics, fields, public }
+        Node::StructDef {
+            name,
+            generics,
+            fields,
+            public,
+        }
     }
 
     fn parse_trait_def(&mut self, public: bool) -> Node {
@@ -1648,7 +1781,12 @@ impl<'stop_arr> Parser<'stop_arr> {
             self.consume_decl_separator();
         }
 
-        Node::TraitDef { name, generics, methods, public }
+        Node::TraitDef {
+            name,
+            generics,
+            methods,
+            public,
+        }
     }
 
     fn parse_impl_block(&mut self) -> Node {
@@ -1675,14 +1813,25 @@ impl<'stop_arr> Parser<'stop_arr> {
 
             self.expect_token(Kind::FN_DEF, "Expected a method definition in impl body.");
             let signature = self.parse_function_signature();
-            self.expect_token(Kind::L_BRACKET, "Expected a method body after method signature.");
+            self.expect_token(
+                Kind::L_BRACKET,
+                "Expected a method body after method signature.",
+            );
             let body = self.parse_block(true);
-            methods.push(ImplMethod { signature, body: bi!(body) });
+            methods.push(ImplMethod {
+                signature,
+                body: bi!(body),
+            });
 
             self.consume_decl_separator();
         }
 
-        Node::ImplBlock { generics, trait_ref, target, methods }
+        Node::ImplBlock {
+            generics,
+            trait_ref,
+            target,
+            methods,
+        }
     }
 
     fn parse_struct_init(&mut self, name: TypeRef) -> Node {
@@ -1702,25 +1851,36 @@ impl<'stop_arr> Parser<'stop_arr> {
             let value = self
                 .parse_until(Some(FIELD_VALUE_END))
                 .get_first_or_else(|| {
-                    error!(&self.lexer, "Expected a value after struct literal field ':'.")
+                    error!(
+                        &self.lexer,
+                        "Expected a value after struct literal field ':'."
+                    )
                 });
             self.clean_stop();
 
             fields.push((field_name, value));
 
             match self.peek_token() {
-                Some(Token { kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE, .. }) => {
+                Some(Token {
+                    kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE,
+                    ..
+                }) => {
                     self.next_token();
                 }
-                Some(Token { kind: Kind::R_BRACKET, .. }) => {
+                Some(Token {
+                    kind: Kind::R_BRACKET,
+                    ..
+                }) => {
                     self.next_token();
                     break;
                 }
-                Some(other) =>
-                    error!(
-                        &self.lexer,
-                        format!("Expected ',' or '}}' after struct literal field. Got: {:?}", other)
-                    ),
+                Some(other) => error!(
+                    &self.lexer,
+                    format!(
+                        "Expected ',' or '}}' after struct literal field. Got: {:?}",
+                        other
+                    )
+                ),
                 None => error!(&self.lexer, "Expected closing '}' for struct literal."),
             }
         }
@@ -1738,11 +1898,18 @@ impl<'stop_arr> Parser<'stop_arr> {
             None
         };
 
-        FunctionSignature { name, params, return_type }
+        FunctionSignature {
+            name,
+            params,
+            return_type,
+        }
     }
 
     fn parse_function_params(&mut self) -> Vec<FunctionParam> {
-        self.expect_token(Kind::L_PARENT, "Expected '(' after function or method name.");
+        self.expect_token(
+            Kind::L_PARENT,
+            "Expected '(' after function or method name.",
+        );
 
         let mut params = Vec::new();
         loop {
@@ -1764,18 +1931,22 @@ impl<'stop_arr> Parser<'stop_arr> {
             params.push(FunctionParam { name, type_ref });
 
             match self.peek_token() {
-                Some(Token { kind: Kind::COMMA, .. }) => {
+                Some(Token {
+                    kind: Kind::COMMA, ..
+                }) => {
                     self.next_token();
                 }
-                Some(Token { kind: Kind::R_PARENT, .. }) => {
+                Some(Token {
+                    kind: Kind::R_PARENT,
+                    ..
+                }) => {
                     self.next_token();
                     break;
                 }
-                Some(other) =>
-                    error!(
-                        &self.lexer,
-                        format!("Expected ',' or ')' after parameter. Got: {:?}", other)
-                    ),
+                Some(other) => error!(
+                    &self.lexer,
+                    format!("Expected ',' or ')' after parameter. Got: {:?}", other)
+                ),
                 None => error!(&self.lexer, "Expected ')' after parameters."),
             }
         }
@@ -1798,7 +1969,8 @@ impl<'stop_arr> Parser<'stop_arr> {
 
             while self.peek_token().is(Kind::DOT) {
                 self.next_token();
-                segments.push(self.parse_identifier_name("Expected a module path segment after '.'."));
+                segments
+                    .push(self.parse_identifier_name("Expected a module path segment after '.'."));
             }
         } else if relative_level == 0 {
             error!(&self.lexer, "Expected a module path.");
@@ -1817,18 +1989,22 @@ impl<'stop_arr> Parser<'stop_arr> {
                 generics.push(self.parse_type_ref());
 
                 match self.peek_token() {
-                    Some(Token { kind: Kind::COMMA, .. }) => {
+                    Some(Token {
+                        kind: Kind::COMMA, ..
+                    }) => {
                         self.next_token();
                     }
                     Some(Token { kind: Kind::GT, .. }) => {
                         self.next_token();
                         break;
                     }
-                    Some(other) =>
-                        error!(
-                            &self.lexer,
-                            format!("Expected ',' or '>' in generic type arguments. Got: {:?}", other)
-                        ),
+                    Some(other) => error!(
+                        &self.lexer,
+                        format!(
+                            "Expected ',' or '>' in generic type arguments. Got: {:?}",
+                            other
+                        )
+                    ),
                     None => error!(&self.lexer, "Expected '>' after generic type arguments."),
                 }
             }
@@ -1853,18 +2029,22 @@ impl<'stop_arr> Parser<'stop_arr> {
             generics.push(self.parse_identifier_name("Expected a generic parameter name."));
 
             match self.peek_token() {
-                Some(Token { kind: Kind::COMMA, .. }) => {
+                Some(Token {
+                    kind: Kind::COMMA, ..
+                }) => {
                     self.next_token();
                 }
                 Some(Token { kind: Kind::GT, .. }) => {
                     self.next_token();
                     break;
                 }
-                Some(other) =>
-                    error!(
-                        &self.lexer,
-                        format!("Expected ',' or '>' in generic parameter list. Got: {:?}", other)
-                    ),
+                Some(other) => error!(
+                    &self.lexer,
+                    format!(
+                        "Expected ',' or '>' in generic parameter list. Got: {:?}",
+                        other
+                    )
+                ),
                 None => error!(&self.lexer, "Expected '>' after generic parameter list."),
             }
         }
@@ -1874,7 +2054,11 @@ impl<'stop_arr> Parser<'stop_arr> {
 
     fn parse_identifier_name(&mut self, message: &str) -> String {
         match self.next_token() {
-            Some(Token { kind: Kind::IDENTIFIER, value, .. }) => value,
+            Some(Token {
+                kind: Kind::IDENTIFIER,
+                value,
+                ..
+            }) => value,
             Some(other) => error!(&self.lexer, format!("{} Got: {:?}", message, other)),
             None => error!(&self.lexer, message),
         }
@@ -1889,7 +2073,10 @@ impl<'stop_arr> Parser<'stop_arr> {
     fn consume_decl_separator(&mut self) {
         loop {
             match self.peek_token() {
-                Some(Token { kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE, .. }) => {
+                Some(Token {
+                    kind: Kind::COMMA | Kind::SEMICOLON | Kind::NEW_LINE,
+                    ..
+                }) => {
                     self.next_token();
                 }
                 _ => break,
@@ -1918,5 +2105,18 @@ impl<'stop_arr> Parser<'stop_arr> {
             Node::Identifier(name) => Some(TypeRef::new(name, Vec::new())),
             _ => None,
         }
+    }
+}
+
+fn function_args_from_params(params: &[FunctionParam]) -> Node {
+    match params {
+        [] => Node::Group(None),
+        [param] => Node::Group(Some(Box::new(Node::Identifier(param.name.clone())))),
+        _ => Node::WrappedSequence(
+            params
+                .iter()
+                .map(|param| Node::Identifier(param.name.clone()))
+                .collect(),
+        ),
     }
 }

@@ -12,7 +12,9 @@ pub struct ConfigError {
 
 impl ConfigError {
     pub(crate) fn new<T: Into<String>>(message: T) -> Self {
-        ConfigError { message: message.into() }
+        ConfigError {
+            message: message.into(),
+        }
     }
 }
 
@@ -79,13 +81,15 @@ pub fn discover_manifest(start: &Path) -> Option<PathBuf> {
 
 pub fn load_manifest(path: &Path) -> Result<LangManifest, ConfigError> {
     let manifest_path = path.to_path_buf();
-    let manifest_dir = manifest_path.parent().ok_or_else(|| {
-        ConfigError::new(format!(
-            "Manifest '{}' has no parent directory.",
-            manifest_path.display()
-        ))
-    })?
-    .to_path_buf();
+    let manifest_dir = manifest_path
+        .parent()
+        .ok_or_else(|| {
+            ConfigError::new(format!(
+                "Manifest '{}' has no parent directory.",
+                manifest_path.display()
+            ))
+        })?
+        .to_path_buf();
 
     let contents = fs::read_to_string(&manifest_path).map_err(|error| {
         ConfigError::new(format!(
@@ -112,9 +116,7 @@ pub fn load_manifest(path: &Path) -> Result<LangManifest, ConfigError> {
     let project_root = manifest_dir.join(root);
     let entry_file = project.entry.map(|entry| project_root.join(entry));
 
-    let transpiler = file
-        .run
-        .and_then(|run| run.transpiler);
+    let transpiler = file.run.and_then(|run| run.transpiler);
 
     Ok(LangManifest {
         manifest_path,
@@ -144,7 +146,11 @@ pub fn resolve_run_config(
 
     let project_root = cli_project_root
         .map(|path| absolutize_path(cwd, path))
-        .or_else(|| manifest.as_ref().map(|manifest| manifest.project_root.clone()));
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .map(|manifest| manifest.project_root.clone())
+        });
 
     if let Some(project_root) = project_root.as_ref() {
         if !project_root.is_dir() {
@@ -156,7 +162,11 @@ pub fn resolve_run_config(
     }
 
     let transpiler = cli_transpiler
-        .or_else(|| manifest.as_ref().and_then(|manifest| manifest.transpiler.clone()))
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|manifest| manifest.transpiler.clone())
+        })
         .unwrap_or_else(|| DEFAULT_TRANSPILER.to_string());
     validate_transpiler(&transpiler)?;
 
@@ -165,10 +175,9 @@ pub fn resolve_run_config(
     let entry_file = match file {
         Some(file) => file,
         None => match manifest.as_ref() {
-            Some(manifest) => manifest
-                .entry_file
-                .clone()
-                .ok_or_else(|| ConfigError::new("Manifest-driven execution requires project.entry."))?,
+            Some(manifest) => manifest.entry_file.clone().ok_or_else(|| {
+                ConfigError::new("Manifest-driven execution requires project.entry.")
+            })?,
             None => {
                 return Err(ConfigError::new(
                     "No entry file provided and no lang.toml was found.",
@@ -196,8 +205,7 @@ fn validate_transpiler(transpiler: &str) -> Result<(), ConfigError> {
     if transpiler != DEFAULT_TRANSPILER {
         return Err(ConfigError::new(format!(
             "Unsupported transpiler '{}'. Only '{}' is supported right now.",
-            transpiler,
-            DEFAULT_TRANSPILER
+            transpiler, DEFAULT_TRANSPILER
         )));
     }
 

@@ -1,0 +1,35 @@
+==================
+Raw Python
+==================
+
+#[python]
+class Counter:
+    def __init__(self, value):
+        self.value = value
+#[endpython]
+
+counter = Counter(5)
+print(counter.value)
+
+---
+
+(source_file
+  (python_block
+    content: (python_content))
+  (assignment_statement
+    left: (assignment_target
+      (identifier))
+    operator: (assignment_operator)
+    right: (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (argument
+          (number)))))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (argument
+          (member_expression
+            object: (identifier)
+            property: (identifier)))))))

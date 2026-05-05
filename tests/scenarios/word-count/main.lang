@@ -1,0 +1,10 @@
+text = std.fs.read_text("input.txt")
+    .expect("Failed to read input.txt")
+    .strip()
+
+lines = text.split("\n")
+words = text.words()
+
+print(lines.len)
+print(words.len)
+print(text.len)

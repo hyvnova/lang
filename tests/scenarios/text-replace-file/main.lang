@@ -1,0 +1,6 @@
+args = std.env.args()
+source = std.fs.read_text(args[0]).expect("Failed to read input")
+    .strip()
+updated = source.replace("hello", "hi")
+std.fs.write_text(args[1], updated).unwrap()
+print(std.fs.exists(args[1]))

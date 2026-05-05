@@ -1,0 +1,9 @@
+entry = "main.lang"
+args = ["input.txt", "output.txt"]
+expected_stdout = "True\n"
+
+[[expected_files]]
+path = "output.txt"
+contents = """hi rust
+hi python
+hi lamp"""

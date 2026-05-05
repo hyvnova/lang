@@ -1,15 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::sync::OnceLock;
 
 use rand::random;
 
-use crate::ast::{AST, ImportName, ModulePath, Node};
+use crate::ast::{ImportName, ModulePath, Node, AST};
 use crate::parser::Parser;
+use crate::std_catalog::{STD_MODULES, STD_ROOT};
 use crate::transpilers::python_transpiler::Transpiler;
 
 const MODULE_STR_BINDING: &str = "__module_str__";
+const STD_NATIVE_MODULE: &str = "lang_std_native";
 
 #[derive(Debug, Clone)]
 pub struct ModuleError {
@@ -18,7 +22,9 @@ pub struct ModuleError {
 
 impl ModuleError {
     fn new<T: Into<String>>(message: T) -> Self {
-        ModuleError { message: message.into() }
+        ModuleError {
+            message: message.into(),
+        }
     }
 }
 
@@ -56,7 +62,10 @@ enum ExportKind {
 
 #[derive(Debug, Clone)]
 enum UseTarget {
-    Item { module_id: String, export_name: String },
+    Item {
+        module_id: String,
+        export_name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +128,7 @@ pub fn build_project(
         module_order: Vec::new(),
         loading_stack: Vec::new(),
     };
+    builder.register_std_modules();
 
     let entry_module_id = builder.load_module_file(&entry_file)?;
     builder.finalize_exports()?;
@@ -130,7 +140,9 @@ pub fn build_project(
         .ok_or_else(|| ModuleError::new("Entry module disappeared during build."))?;
 
     if entry_module.python_name.is_empty() {
-        return Err(ModuleError::new("Project root package cannot be used as an executable entrypoint."));
+        return Err(ModuleError::new(
+            "Project root package cannot be used as an executable entrypoint.",
+        ));
     }
 
     Ok(CompiledProject {
@@ -139,31 +151,133 @@ pub fn build_project(
     })
 }
 
-pub fn run_project(entry_file: PathBuf, project_root: Option<PathBuf>) -> Result<std::process::Output, ModuleError> {
+pub fn run_project(
+    entry_file: PathBuf,
+    project_root: Option<PathBuf>,
+) -> Result<Output, ModuleError> {
+    run_project_with_io(entry_file, project_root, "", &[])
+}
+
+pub fn run_project_with_io(
+    entry_file: PathBuf,
+    project_root: Option<PathBuf>,
+    stdin: &str,
+    args: &[&str],
+) -> Result<Output, ModuleError> {
     let output_root = std::env::temp_dir().join(format!("lang_project_{}", random::<u64>()));
     fs::create_dir_all(&output_root).map_err(|error| {
-        ModuleError::new(format!("Failed to create project output directory: {error}"))
+        ModuleError::new(format!(
+            "Failed to create project output directory: {error}"
+        ))
     })?;
 
+    let run_cwd = project_root.clone().unwrap_or_else(|| {
+        entry_file
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    });
     let compiled = build_project(entry_file, project_root, &output_root)?;
     let output_root_str = output_root.to_string_lossy().replace('\\', "/");
     let command = format!(
         "import sys; sys.path.insert(0, r'{}'); import {}",
-        output_root_str,
-        compiled.entry_module_name
+        output_root_str, compiled.entry_module_name
     );
 
-    let output = Command::new("py")
-        .arg("-c")
-        .arg(&command)
-        .output()
-        .or_else(|_| Command::new("python").arg("-c").arg(&command).output())
-        .map_err(|error| ModuleError::new(format!("Failed to run generated Python project: {error}")))?;
+    let output = run_python_project_command(&command, &run_cwd, stdin, args)?;
 
     Ok(output)
 }
 
+fn run_python_project_command(
+    command: &str,
+    cwd: &Path,
+    stdin: &str,
+    args: &[&str],
+) -> Result<Output, ModuleError> {
+    let mut last_error = None;
+    for candidate in ["py", "python"] {
+        let mut process = Command::new(candidate);
+        process.current_dir(cwd).arg("-c").arg(command).args(args);
+
+        let result = if stdin.is_empty() {
+            process.output()
+        } else {
+            process
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = match process.spawn() {
+                Ok(child) => child,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin should be piped")
+                .write_all(stdin.as_bytes())
+                .and_then(|_| child.wait_with_output())
+        };
+
+        match result {
+            Ok(output) => return Ok(output),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    Err(ModuleError::new(format!(
+        "Failed to run generated Python project: {}",
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no Python executable candidates were tried".to_string())
+    )))
+}
+
 impl ProjectBuilder {
+    fn register_std_modules(&mut self) {
+        let mut root_exports = BTreeMap::new();
+        for module in STD_MODULES.iter().filter(|module| module.name != "prelude") {
+            root_exports.insert(module.name.to_string(), ExportKind::Module);
+        }
+
+        self.modules.insert(
+            STD_ROOT.to_string(),
+            ModuleRecord {
+                id: STD_ROOT.to_string(),
+                python_name: STD_ROOT.to_string(),
+                output_path: PathBuf::from(STD_ROOT).join("__init__.py"),
+                is_package: true,
+                package_segments: vec![STD_ROOT.to_string()],
+                ast: AST::new(),
+                exports: root_exports,
+            },
+        );
+
+        for module in STD_MODULES.iter() {
+            let module_name = module.name;
+            let module_id = format!("{STD_ROOT}.{module_name}");
+            self.modules.insert(
+                module_id.clone(),
+                ModuleRecord {
+                    id: module_id.clone(),
+                    python_name: module_id,
+                    output_path: PathBuf::from(STD_ROOT).join(format!("{module_name}.py")),
+                    is_package: false,
+                    package_segments: vec![STD_ROOT.to_string()],
+                    ast: AST::new(),
+                    exports: module
+                        .exports
+                        .iter()
+                        .map(|export| (export.name.to_string(), ExportKind::Local))
+                        .collect(),
+                },
+            );
+        }
+    }
+
     fn load_module_file(&mut self, source_path: &Path) -> Result<String, ModuleError> {
         let source_path = canonicalize_file(source_path)?;
         let module_id = module_id_from_path(&self.root, &source_path)?;
@@ -172,7 +286,11 @@ impl ProjectBuilder {
             return Ok(module_id);
         }
 
-        if let Some(index) = self.loading_stack.iter().position(|candidate| candidate == &module_id) {
+        if let Some(index) = self
+            .loading_stack
+            .iter()
+            .position(|candidate| candidate == &module_id)
+        {
             let mut chain = self.loading_stack[index..].to_vec();
             chain.push(module_id.clone());
             return Err(ModuleError::new(format!(
@@ -184,7 +302,10 @@ impl ProjectBuilder {
         self.loading_stack.push(module_id.clone());
 
         let source = fs::read_to_string(&source_path).map_err(|error| {
-            ModuleError::new(format!("Failed to read module '{}': {error}", source_path.display()))
+            ModuleError::new(format!(
+                "Failed to read module '{}': {error}",
+                source_path.display()
+            ))
         })?;
         let mut parser = Parser::new(source);
         parser.parse();
@@ -227,11 +348,17 @@ impl ProjectBuilder {
                 }
                 Node::ImportStmt { path, .. } | Node::FromImport { path, .. } => {
                     let target = self.resolve_module_path(&record, path)?;
+                    if is_std_segments(&target) {
+                        continue;
+                    }
                     let target_path = self.locate_module_file(&target)?;
                     self.load_module_file(&target_path)?;
                 }
                 Node::UseDecl { path, .. } => {
                     let target = self.resolve_use_target_path(&record, path)?;
+                    if is_std_segments(&target.module_segments) {
+                        continue;
+                    }
                     let target_path = self.locate_module_file(&target.module_segments)?;
                     self.load_module_file(&target_path)?;
                 }
@@ -267,8 +394,7 @@ impl ProjectBuilder {
                 if exports.contains_key(&name) {
                     return Err(ModuleError::new(format!(
                         "Module '{}' exports '{}' more than once.",
-                        module_id,
-                        name
+                        module_id, name
                     )));
                 }
                 exports.insert(name, export);
@@ -280,8 +406,14 @@ impl ProjectBuilder {
 
     fn emit_project(&self, output_root: &Path) -> Result<(), ModuleError> {
         fs::create_dir_all(output_root).map_err(|error| {
-            ModuleError::new(format!("Failed to create output root '{}': {error}", output_root.display()))
+            ModuleError::new(format!(
+                "Failed to create output root '{}': {error}",
+                output_root.display()
+            ))
         })?;
+
+        self.emit_std_project(output_root)?;
+        copy_native_runtime(output_root)?;
 
         for module_id in self.module_order.iter() {
             let module = self.modules.get(module_id).unwrap();
@@ -312,7 +444,31 @@ impl ProjectBuilder {
         Ok(())
     }
 
-    fn ensure_parent_packages(&self, output_root: &Path, output_path: &Path) -> Result<(), ModuleError> {
+    fn emit_std_project(&self, output_root: &Path) -> Result<(), ModuleError> {
+        let std_root = output_root.join(STD_ROOT);
+        fs::create_dir_all(&std_root).map_err(|error| {
+            ModuleError::new(format!(
+                "Failed to create std output directory '{}': {error}",
+                std_root.display()
+            ))
+        })?;
+
+        write_generated_file(&std_root.join("__init__.py"), std_init_source())?;
+        for module in STD_MODULES.iter() {
+            write_generated_file(
+                &std_root.join(format!("{}.py", module.name)),
+                &std_facade_source(module.name, module.exports),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn ensure_parent_packages(
+        &self,
+        output_root: &Path,
+        output_path: &Path,
+    ) -> Result<(), ModuleError> {
         let mut current = output_root.join(output_path);
         while let Some(parent) = current.parent() {
             if parent == output_root {
@@ -335,7 +491,10 @@ impl ProjectBuilder {
         Ok(())
     }
 
-    fn collect_base_exports(&self, module: &ModuleRecord) -> Result<BTreeMap<String, ExportKind>, ModuleError> {
+    fn collect_base_exports(
+        &self,
+        module: &ModuleRecord,
+    ) -> Result<BTreeMap<String, ExportKind>, ModuleError> {
         let mut exports = BTreeMap::new();
 
         for node in module.ast.get_scope() {
@@ -362,12 +521,7 @@ impl ProjectBuilder {
                     if public {
                         let child_path = self.resolve_child_module_path(module, &name)?;
                         let _child_id = module_id_from_path(&self.root, &child_path)?;
-                        insert_export(
-                            &mut exports,
-                            &module.id,
-                            &name,
-                            ExportKind::Module,
-                        )?;
+                        insert_export(&mut exports, &module.id, &name, ExportKind::Module)?;
                     }
                 }
                 _ => {}
@@ -384,7 +538,12 @@ impl ProjectBuilder {
         let mut exports = Vec::new();
 
         for node in module.ast.get_scope() {
-            let Node::UseDecl { path, alias, public } = node else {
+            let Node::UseDecl {
+                path,
+                alias,
+                public,
+            } = node
+            else {
                 continue;
             };
 
@@ -393,7 +552,10 @@ impl ProjectBuilder {
             }
 
             let resolved = self.resolve_use_target(module, &path)?;
-            let UseTarget::Item { module_id: _, export_name: _ } = resolved.target;
+            let UseTarget::Item {
+                module_id: _,
+                export_name: _,
+            } = resolved.target;
 
             exports.push((
                 alias.clone().unwrap_or(resolved.local_name),
@@ -420,7 +582,10 @@ impl ProjectBuilder {
                 &mut all_bindings,
             )?;
 
-            if effect.import_line.is_some() || !effect.extra_lines.is_empty() || !effect.bindings.is_empty() {
+            if effect.import_line.is_some()
+                || !effect.extra_lines.is_empty()
+                || !effect.bindings.is_empty()
+            {
                 effects.insert(index, effect);
             }
         }
@@ -428,7 +593,10 @@ impl ProjectBuilder {
         let mut emitted_imports = BTreeSet::new();
         let mut active_bindings = BTreeMap::new();
         let mut current_locals = HashSet::new();
-        let mut transformed = Vec::new();
+        let mut transformed = vec![Node::Python(
+            "from std.prelude import *\nimport std as __lang_std\nstd = __lang_wrap_module__(__lang_std, \"std\")"
+                .to_string(),
+        )];
 
         for (index, node) in nodes.iter().enumerate() {
             if let Some(effect) = effects.get(&index) {
@@ -461,7 +629,12 @@ impl ProjectBuilder {
                 continue;
             }
 
-            transformed.push(self.rewrite_node(node, &active_bindings, &all_bindings, &current_locals));
+            transformed.push(self.rewrite_node(
+                node,
+                &active_bindings,
+                &all_bindings,
+                &current_locals,
+            ));
 
             match node {
                 Node::BindingDef { name, .. } => {
@@ -478,7 +651,9 @@ impl ProjectBuilder {
             }
         }
 
-        Ok(AST { scopes: vec![transformed] })
+        Ok(AST {
+            scopes: vec![transformed],
+        })
     }
 
     fn resolve_node_effect(
@@ -494,15 +669,23 @@ impl ProjectBuilder {
                 let target = self.resolve_module_path(module, path)?;
                 let target_id = target.join(".");
                 let target_module = self.module(&target_id)?;
-                let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &target_id);
+                let hidden_alias =
+                    self.hidden_alias_for(alias_counter, alias_by_module, &target_id);
                 let alias = alias
                     .clone()
                     .or_else(|| path.last_segment().cloned())
                     .ok_or_else(|| ModuleError::new("import requires a target module name."))?;
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", target_module.python_name, hidden_alias)),
-                    extra_lines: vec![wrap_module_line(&alias, &hidden_alias, &target_module.python_name)],
+                    import_line: Some(format!(
+                        "import {} as {}",
+                        target_module.python_name, hidden_alias
+                    )),
+                    extra_lines: vec![wrap_module_line(
+                        &alias,
+                        &hidden_alias,
+                        &target_module.python_name,
+                    )],
                     ..ResolvedNodeEffect::default()
                 })
             }
@@ -513,16 +696,28 @@ impl ProjectBuilder {
                 let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &child_id);
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", child_module.python_name, hidden_alias)),
-                    extra_lines: vec![wrap_module_line(name, &hidden_alias, &child_module.python_name)],
+                    import_line: Some(format!(
+                        "import {} as {}",
+                        child_module.python_name, hidden_alias
+                    )),
+                    extra_lines: vec![wrap_module_line(
+                        name,
+                        &hidden_alias,
+                        &child_module.python_name,
+                    )],
                     ..ResolvedNodeEffect::default()
                 })
             }
-            Node::FromImport { path, names, wildcard } => {
+            Node::FromImport {
+                path,
+                names,
+                wildcard,
+            } => {
                 let target = self.resolve_module_path(module, path)?;
                 let target_id = target.join(".");
                 let target_module = self.module(&target_id)?;
-                let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &target_id);
+                let hidden_alias =
+                    self.hidden_alias_for(alias_counter, alias_by_module, &target_id);
                 let mut bindings = Vec::new();
 
                 if *wildcard {
@@ -539,8 +734,7 @@ impl ProjectBuilder {
                         if !target_module.exports.contains_key(name) {
                             return Err(ModuleError::new(format!(
                                 "Module '{}' does not publicly export '{}'.",
-                                target_id,
-                                name
+                                target_id, name
                             )));
                         }
 
@@ -555,16 +749,27 @@ impl ProjectBuilder {
                 }
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", target_module.python_name, hidden_alias)),
+                    import_line: Some(format!(
+                        "import {} as {}",
+                        target_module.python_name, hidden_alias
+                    )),
                     bindings,
                     ..ResolvedNodeEffect::default()
                 })
             }
-            Node::UseDecl { path, alias, public } => {
+            Node::UseDecl {
+                path,
+                alias,
+                public,
+            } => {
                 let resolved = self.resolve_use_target(module, path)?;
-                let UseTarget::Item { module_id, export_name } = resolved.target;
+                let UseTarget::Item {
+                    module_id,
+                    export_name,
+                } = resolved.target;
                 let target_module = self.module(&module_id)?;
-                let hidden_alias = self.hidden_alias_for(alias_counter, alias_by_module, &module_id);
+                let hidden_alias =
+                    self.hidden_alias_for(alias_counter, alias_by_module, &module_id);
                 let local_name = alias.clone().unwrap_or(resolved.local_name);
                 let binding = ImportBinding {
                     exporter_alias: hidden_alias.clone(),
@@ -579,7 +784,10 @@ impl ProjectBuilder {
                 }
 
                 Ok(ResolvedNodeEffect {
-                    import_line: Some(format!("import {} as {}", target_module.python_name, hidden_alias)),
+                    import_line: Some(format!(
+                        "import {} as {}",
+                        target_module.python_name, hidden_alias
+                    )),
                     extra_lines,
                     bindings: vec![(local_name, binding)],
                 })
@@ -588,12 +796,15 @@ impl ProjectBuilder {
         }
     }
 
-    fn resolve_child_module_path(&self, module: &ModuleRecord, child_name: &str) -> Result<PathBuf, ModuleError> {
+    fn resolve_child_module_path(
+        &self,
+        module: &ModuleRecord,
+        child_name: &str,
+    ) -> Result<PathBuf, ModuleError> {
         if !module.is_package {
             return Err(ModuleError::new(format!(
                 "Module '{}' cannot declare child module '{}'; only mod.lang files can use 'mod'.",
-                module.id,
-                child_name
+                module.id, child_name
             )));
         }
 
@@ -602,17 +813,42 @@ impl ProjectBuilder {
         self.locate_module_file(&segments)
     }
 
-    fn resolve_module_path(&self, module: &ModuleRecord, path: &ModulePath) -> Result<Vec<String>, ModuleError> {
+    fn resolve_module_path(
+        &self,
+        module: &ModuleRecord,
+        path: &ModulePath,
+    ) -> Result<Vec<String>, ModuleError> {
         let segments = self.absolute_segments(module, path)?;
+        if is_std_segments(&segments) {
+            if self.modules.contains_key(&segments.join(".")) {
+                return Ok(segments);
+            }
+            return Err(ModuleError::new(format!(
+                "Module '{}' does not exist in the standard library.",
+                segments.join(".")
+            )));
+        }
         self.locate_module_file(&segments)?;
         Ok(segments)
     }
 
-    fn resolve_use_target_path(&self, module: &ModuleRecord, path: &ModulePath) -> Result<ResolvedModulePath, ModuleError> {
+    fn resolve_use_target_path(
+        &self,
+        module: &ModuleRecord,
+        path: &ModulePath,
+    ) -> Result<ResolvedModulePath, ModuleError> {
         let segments = self.absolute_segments(module, path)?;
 
         for split in (1..=segments.len()).rev() {
             let module_segments = segments[..split].to_vec();
+            if is_std_segments(&module_segments)
+                && self.modules.contains_key(&module_segments.join("."))
+            {
+                return Ok(ResolvedModulePath {
+                    module_segments,
+                    tail: segments[split..].to_vec(),
+                });
+            }
             if self.locate_module_file(&module_segments).is_ok() {
                 return Ok(ResolvedModulePath {
                     module_segments,
@@ -628,7 +864,11 @@ impl ProjectBuilder {
         )))
     }
 
-    fn resolve_use_target(&self, module: &ModuleRecord, path: &ModulePath) -> Result<ResolvedUse, ModuleError> {
+    fn resolve_use_target(
+        &self,
+        module: &ModuleRecord,
+        path: &ModulePath,
+    ) -> Result<ResolvedUse, ModuleError> {
         let resolved = self.resolve_use_target_path(module, path)?;
 
         if resolved.tail.len() != 1 {
@@ -643,8 +883,7 @@ impl ProjectBuilder {
         if !exporter.exports.contains_key(&export_name) {
             return Err(ModuleError::new(format!(
                 "Module '{}' does not publicly export '{}'.",
-                exporter.id,
-                export_name
+                exporter.id, export_name
             )));
         }
 
@@ -657,8 +896,16 @@ impl ProjectBuilder {
         })
     }
 
-    fn absolute_segments(&self, module: &ModuleRecord, path: &ModulePath) -> Result<Vec<String>, ModuleError> {
+    fn absolute_segments(
+        &self,
+        module: &ModuleRecord,
+        path: &ModulePath,
+    ) -> Result<Vec<String>, ModuleError> {
         if path.relative_level == 0 {
+            if path.segments.first().map(|segment| segment.as_str()) == Some(STD_ROOT) {
+                return Ok(path.segments.clone());
+            }
+
             if path.segments.len() == 1 {
                 let mut sibling_segments = module.package_segments.clone();
                 sibling_segments.extend(path.segments.clone());
@@ -696,13 +943,26 @@ impl ProjectBuilder {
     }
 
     fn locate_module_file(&self, segments: &[String]) -> Result<PathBuf, ModuleError> {
+        if is_std_segments(segments) {
+            if self.modules.contains_key(&segments.join(".")) {
+                return Ok(PathBuf::from(format!("<{}>", segments.join("."))));
+            }
+            return Err(ModuleError::new(format!(
+                "Module '{}' does not exist in the standard library.",
+                segments.join(".")
+            )));
+        }
+
         let mut dir_path = self.root.clone();
         for segment in segments.iter() {
             dir_path.push(segment);
         }
 
         let package_path = dir_path.join("mod.lang");
-        let file_path = self.root.join(PathBuf::from_iter(segments.iter())).with_extension("lang");
+        let file_path = self
+            .root
+            .join(PathBuf::from_iter(segments.iter()))
+            .with_extension("lang");
 
         let has_package = package_path.exists();
         let has_file = file_path.exists();
@@ -756,7 +1016,12 @@ impl ProjectBuilder {
         match node {
             Node::Identifier(name) => rewrite_identifier(name, active_bindings, locals),
             Node::MemberAccess { object, member } => Node::MemberAccess {
-                object: Box::new(self.rewrite_node(object, active_bindings, module_bindings, locals)),
+                object: Box::new(self.rewrite_node(
+                    object,
+                    active_bindings,
+                    module_bindings,
+                    locals,
+                )),
                 member: Box::new((**member).clone()),
             },
             Node::Group(expr) => Node::Group(expr.as_ref().map(|expr| {
@@ -782,7 +1047,12 @@ impl ProjectBuilder {
                 locals,
             ))),
             Node::Index { object, index } => Node::Index {
-                object: Box::new(self.rewrite_node(object, active_bindings, module_bindings, locals)),
+                object: Box::new(self.rewrite_node(
+                    object,
+                    active_bindings,
+                    module_bindings,
+                    locals,
+                )),
                 index: Box::new(self.rewrite_node(index, active_bindings, module_bindings, locals)),
             },
             Node::Sequence(values) => Node::Sequence(
@@ -810,7 +1080,12 @@ impl ProjectBuilder {
                     .collect(),
             ),
             Node::FunctionCall { object, args } => Node::FunctionCall {
-                object: Box::new(self.rewrite_node(object, active_bindings, module_bindings, locals)),
+                object: Box::new(self.rewrite_node(
+                    object,
+                    active_bindings,
+                    module_bindings,
+                    locals,
+                )),
                 args: Box::new(self.rewrite_node(args, active_bindings, module_bindings, locals)),
             },
             Node::Return(value) => Node::Return(Box::new(self.rewrite_node(
@@ -835,7 +1110,11 @@ impl ProjectBuilder {
                 module_bindings,
                 locals,
             ))),
-            Node::Range { start, end, inclusive } => Node::Range {
+            Node::Range {
+                start,
+                end,
+                inclusive,
+            } => Node::Range {
                 start: Box::new(self.rewrite_node(start, active_bindings, module_bindings, locals)),
                 end: Box::new(self.rewrite_node(end, active_bindings, module_bindings, locals)),
                 inclusive: *inclusive,
@@ -872,10 +1151,20 @@ impl ProjectBuilder {
                 combined_locals.extend(lambda_locals);
                 Node::Lambda {
                     args: Box::new((**args).clone()),
-                    body: Box::new(self.rewrite_node(body, module_bindings, module_bindings, &combined_locals)),
+                    body: Box::new(self.rewrite_node(
+                        body,
+                        module_bindings,
+                        module_bindings,
+                        &combined_locals,
+                    )),
                 }
             }
-            Node::Conditional { condition, body, elifs, else_body } => Node::Conditional {
+            Node::Conditional {
+                condition,
+                body,
+                elifs,
+                else_body,
+            } => Node::Conditional {
                 condition: Box::new(self.rewrite_node(
                     condition,
                     active_bindings,
@@ -896,28 +1185,48 @@ impl ProjectBuilder {
                     Box::new(self.rewrite_node(body, active_bindings, module_bindings, locals))
                 }),
             },
-            Node::BindingDef { name, value, public } => {
+            Node::BindingDef {
+                name,
+                value,
+                public,
+            } => {
                 if let Some(binding) = active_bindings.get(name) {
                     Node::Assign {
                         identifiers: vec![Node::MemberAccess {
                             object: Box::new(Node::Identifier(binding.exporter_alias.clone())),
                             member: Box::new(Node::Identifier(binding.export_name.clone())),
                         }],
-                        values: vec![self.rewrite_node(value, active_bindings, module_bindings, locals)],
+                        values: vec![self.rewrite_node(
+                            value,
+                            active_bindings,
+                            module_bindings,
+                            locals,
+                        )],
                         op: "=".to_string(),
                     }
                 } else {
                     Node::BindingDef {
                         name: name.clone(),
-                        value: Box::new(self.rewrite_node(value, active_bindings, module_bindings, locals)),
+                        value: Box::new(self.rewrite_node(
+                            value,
+                            active_bindings,
+                            module_bindings,
+                            locals,
+                        )),
                         public: *public,
                     }
                 }
             }
-            Node::Assign { identifiers, values, op } => Node::Assign {
+            Node::Assign {
+                identifiers,
+                values,
+                op,
+            } => Node::Assign {
                 identifiers: identifiers
                     .iter()
-                    .map(|identifier| rewrite_assignment_target(identifier, active_bindings, locals))
+                    .map(|identifier| {
+                        rewrite_assignment_target(identifier, active_bindings, locals)
+                    })
                     .collect(),
                 values: values
                     .iter()
@@ -925,20 +1234,34 @@ impl ProjectBuilder {
                     .collect(),
                 op: op.clone(),
             },
-            Node::SignalDef { name, value, dependencies } => Node::SignalDef {
+            Node::SignalDef {
+                name,
+                value,
+                dependencies,
+            } => Node::SignalDef {
                 name: name.clone(),
                 value: Box::new(self.rewrite_node(value, active_bindings, module_bindings, locals)),
                 dependencies: dependencies.clone(),
             },
-            Node::SignalUpdate { name, value, dependencies } => Node::SignalUpdate {
+            Node::SignalUpdate {
+                name,
+                value,
+                dependencies,
+            } => Node::SignalUpdate {
                 name: name.clone(),
                 value: Box::new(self.rewrite_node(value, active_bindings, module_bindings, locals)),
                 dependencies: dependencies.clone(),
             },
-            Node::Deconstruction { identifiers, value, default_values } => Node::Deconstruction {
+            Node::Deconstruction {
+                identifiers,
+                value,
+                default_values,
+            } => Node::Deconstruction {
                 identifiers: identifiers
                     .iter()
-                    .map(|identifier| rewrite_assignment_target(identifier, active_bindings, locals))
+                    .map(|identifier| {
+                        rewrite_assignment_target(identifier, active_bindings, locals)
+                    })
                     .collect(),
                 value: Box::new(self.rewrite_node(value, active_bindings, module_bindings, locals)),
                 default_values: default_values
@@ -959,28 +1282,57 @@ fn rewrite_passthrough_node(
     builder: &ProjectBuilder,
 ) -> Node {
     match node {
-        Node::FunctionDef { name, args, body, public } => {
+        Node::FunctionDef {
+            name,
+            args,
+            params,
+            return_type,
+            body,
+            public,
+        } => {
             let function_locals = collect_function_locals(name, args, body);
             Node::FunctionDef {
                 name: name.clone(),
                 args: Box::new((**args).clone()),
-                body: Box::new(builder.rewrite_node(body, module_bindings, module_bindings, &function_locals)),
+                params: params.clone(),
+                return_type: return_type.clone(),
+                body: Box::new(builder.rewrite_node(
+                    body,
+                    module_bindings,
+                    module_bindings,
+                    &function_locals,
+                )),
                 public: *public,
             }
         }
-        Node::StructDef { name, generics, fields, public } => Node::StructDef {
+        Node::StructDef {
+            name,
+            generics,
+            fields,
+            public,
+        } => Node::StructDef {
             name: name.clone(),
             generics: generics.clone(),
             fields: fields.clone(),
             public: *public,
         },
-        Node::TraitDef { name, generics, methods, public } => Node::TraitDef {
+        Node::TraitDef {
+            name,
+            generics,
+            methods,
+            public,
+        } => Node::TraitDef {
             name: name.clone(),
             generics: generics.clone(),
             methods: methods.clone(),
             public: *public,
         },
-        Node::ImplBlock { generics, trait_ref, target, methods } => Node::ImplBlock {
+        Node::ImplBlock {
+            generics,
+            trait_ref,
+            target,
+            methods,
+        } => Node::ImplBlock {
             generics: generics.clone(),
             trait_ref: trait_ref.clone(),
             target: target.clone(),
@@ -988,7 +1340,12 @@ fn rewrite_passthrough_node(
                 .iter()
                 .map(|method| crate::ast::ImplMethod {
                     signature: method.signature.clone(),
-                    body: Box::new(builder.rewrite_node(&method.body, module_bindings, module_bindings, locals)),
+                    body: Box::new(builder.rewrite_node(
+                        &method.body,
+                        module_bindings,
+                        module_bindings,
+                        locals,
+                    )),
                 })
                 .collect(),
         },
@@ -1004,7 +1361,10 @@ fn rewrite_passthrough_node(
                 })
                 .collect(),
         },
-        Node::ReactiveStmt { block, dependencies } => Node::ReactiveStmt {
+        Node::ReactiveStmt {
+            block,
+            dependencies,
+        } => Node::ReactiveStmt {
             block: block
                 .iter()
                 .map(|node| builder.rewrite_node(node, active_bindings, module_bindings, locals))
@@ -1017,7 +1377,11 @@ fn rewrite_passthrough_node(
             module_bindings,
             locals,
         ))),
-        Node::ForLoop { item, iterable, body } => Node::ForLoop {
+        Node::ForLoop {
+            item,
+            iterable,
+            body,
+        } => Node::ForLoop {
             item: Box::new(rewrite_assignment_target(item, active_bindings, locals)),
             iterable: Box::new(builder.rewrite_node(
                 iterable,
@@ -1157,7 +1521,11 @@ fn collect_local_bindings(node: &Node, locals: &mut HashSet<String>) {
                 collect_target_identifiers(identifier, locals);
             }
         }
-        Node::ForLoop { item, iterable, body } => {
+        Node::ForLoop {
+            item,
+            iterable,
+            body,
+        } => {
             collect_target_identifiers(item, locals);
             collect_local_bindings(iterable, locals);
             collect_local_bindings(body, locals);
@@ -1165,7 +1533,12 @@ fn collect_local_bindings(node: &Node, locals: &mut HashSet<String>) {
         Node::Loop(body) | Node::WhileLoop { body, .. } => {
             collect_local_bindings(body, locals);
         }
-        Node::Conditional { body, elifs, else_body, .. } => {
+        Node::Conditional {
+            body,
+            elifs,
+            else_body,
+            ..
+        } => {
             collect_local_bindings(body, locals);
             for (_, body) in elifs.iter() {
                 collect_local_bindings(body, locals);
@@ -1209,8 +1582,7 @@ fn ensure_unique_binding(
     if all_bindings.contains_key(local_name) {
         return Err(ModuleError::new(format!(
             "Module '{}' imports '{}' more than once.",
-            module.id,
-            local_name
+            module.id, local_name
         )));
     }
     all_bindings.insert(local_name.to_string(), binding.clone());
@@ -1219,6 +1591,380 @@ fn ensure_unique_binding(
 
 fn wrap_module_line(local_name: &str, raw_alias: &str, module_name: &str) -> String {
     format!("{local_name} = __lang_wrap_module__({raw_alias}, \"{module_name}\")")
+}
+
+fn is_std_segments(segments: &[String]) -> bool {
+    segments.first().map(|segment| segment.as_str()) == Some(STD_ROOT)
+}
+
+fn std_init_source() -> &'static str {
+    r#""""Lang standard library package generated by the Lang compiler."""
+
+import importlib
+
+__all__ = [
+    "core",
+    "iter",
+    "text",
+    "collections",
+    "math",
+    "random",
+    "path",
+    "fs",
+    "env",
+    "io",
+    "time",
+    "term",
+    "primitives",
+]
+
+
+def __getattr__(name):
+    if name in __all__:
+        module = importlib.import_module(f"std.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module 'std' has no attribute {name!r}")
+"#
+}
+
+fn std_facade_source(module_name: &str, exports: &[crate::std_catalog::StdExport]) -> String {
+    let export_names = exports.iter().map(|export| export.name).collect::<Vec<_>>();
+    let imports = match module_name {
+        "prelude" => {
+            "from builtins import bool as _py_bool, float as _py_float, input, int as _py_int, print, str as _py_str\nfrom std.core import Err, Nothing, Ok, Some\nfrom std.iter import Iterator, iter, range\nfrom std.primitives import Str, Num, Bool, Vec, Map, Set, wrap, unwrap\nfrom lang_std_native import len\n\ndef str(value):\n    return Str(_py_str(unwrap(value)))\n\ndef int(value):\n    return Num(_py_int(unwrap(value)))\n\ndef float(value):\n    return Num(_py_float(unwrap(value)))\n\ndef bool(value):\n    return Bool(_py_bool(unwrap(value)))\n".to_string()
+        }
+        "core" => "from lang_std_native import Some, Nothing as _Nothing, Ok, Err, panic, type_name, debug\nNothing = _Nothing()\n".to_string(),
+        "primitives" => "from primitives import Str, Num, Bool, Vec, Map, Set, wrap, unwrap\n".to_string(),
+        "collections" => "from primitives import Vec, Map, Set\nfrom lang_std_native import Counter\n".to_string(),
+        "fs" => std_fs_source(),
+        "env" => std_env_source(),
+        "io" => std_io_source(),
+        "text" => std_text_source(),
+        "math" => std_math_source(),
+        "random" => std_random_source(),
+        "iter" => std_iter_source(),
+        _ => format!("from lang_std_native import {}\n", export_names.join(", ")),
+    };
+    format!(
+        "\"\"\"Lang std.{module_name} facade generated by the Lang compiler.\"\"\"\n\n{imports}\n__all__ = [{}]\n",
+        export_names
+            .into_iter()
+            .map(|name| format!("{name:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn std_fs_source() -> String {
+    r#"from lang_std_native import Ok, read_text as _read_text, write_text as _write_text, exists as _exists, is_file as _is_file, is_dir as _is_dir, list_dir as _list_dir
+from primitives import Bool, Vec, wrap, unwrap
+
+def _map_ok(result):
+    if result.is_ok():
+        return Ok(wrap(result.unwrap()))
+    return result
+
+def read_text(path):
+    return _map_ok(_read_text(str(unwrap(path))))
+
+def write_text(path, value):
+    return _map_ok(_write_text(str(unwrap(path)), str(unwrap(value))))
+
+def exists(path):
+    return Bool(_exists(str(unwrap(path))))
+
+def is_file(path):
+    return Bool(_is_file(str(unwrap(path))))
+
+def is_dir(path):
+    return Bool(_is_dir(str(unwrap(path))))
+
+def list_dir(path):
+    result = _list_dir(str(unwrap(path)))
+    if result.is_ok():
+        return Ok(Vec(result.unwrap()))
+    return result
+"#
+    .to_string()
+}
+
+fn std_env_source() -> String {
+    r#"from lang_std_native import args as _args
+from primitives import Vec
+
+def args():
+    return Vec(_args())
+"#
+    .to_string()
+}
+
+fn std_io_source() -> String {
+    r#"from lang_std_native import read_line as _read_line, read_to_end as _read_to_end, print as _print, println as _println
+from primitives import Str, unwrap
+
+def read_line():
+    return Str(_read_line())
+
+def read_to_end():
+    return Str(_read_to_end())
+
+def print(value):
+    return _print(unwrap(value))
+
+def println(value):
+    return _println(unwrap(value))
+"#
+    .to_string()
+}
+
+fn std_text_source() -> String {
+    r#"from lang_std_native import upper as _upper, lower as _lower, title as _title, strip as _strip, split as _split, join as _join, replace as _replace, contains as _contains, starts_with as _starts_with, ends_with as _ends_with
+from primitives import Bool, Str, Vec, unwrap
+
+def upper(value):
+    return Str(_upper(str(unwrap(value))))
+
+def lower(value):
+    return Str(_lower(str(unwrap(value))))
+
+def title(value):
+    return Str(_title(str(unwrap(value))))
+
+def strip(value):
+    return Str(_strip(str(unwrap(value))))
+
+def split(value, sep=None):
+    return Vec(_split(str(unwrap(value)), None if sep is None else str(unwrap(sep))))
+
+def join(sep, values):
+    return Str(_join(str(unwrap(sep)), [str(unwrap(value)) for value in values]))
+
+def replace(value, old, new):
+    return Str(_replace(str(unwrap(value)), str(unwrap(old)), str(unwrap(new))))
+
+def contains(value, needle):
+    return Bool(_contains(str(unwrap(value)), str(unwrap(needle))))
+
+def starts_with(value, prefix):
+    return Bool(_starts_with(str(unwrap(value)), str(unwrap(prefix))))
+
+def ends_with(value, suffix):
+    return Bool(_ends_with(str(unwrap(value)), str(unwrap(suffix))))
+"#
+    .to_string()
+}
+
+fn std_math_source() -> String {
+    r#"from lang_std_native import min as _min, max as _max, abs as _abs, round as _round, floor as _floor, ceil as _ceil, sqrt as _sqrt, clamp as _clamp
+from primitives import Num, unwrap
+
+def min(left, right):
+    return Num(_min(float(unwrap(left)), float(unwrap(right))))
+
+def max(left, right):
+    return Num(_max(float(unwrap(left)), float(unwrap(right))))
+
+def abs(value):
+    return Num(_abs(float(unwrap(value))))
+
+def round(value):
+    return Num(_round(float(unwrap(value))))
+
+def floor(value):
+    return Num(_floor(float(unwrap(value))))
+
+def ceil(value):
+    return Num(_ceil(float(unwrap(value))))
+
+def sqrt(value):
+    return Num(_sqrt(float(unwrap(value))))
+
+def clamp(value, low, high):
+    return Num(_clamp(float(unwrap(value)), float(unwrap(low)), float(unwrap(high))))
+"#
+    .to_string()
+}
+
+fn std_random_source() -> String {
+    r#"from lang_std_native import rand as _rand, randint as _randint, choice as _choice, shuffle as _shuffle
+from primitives import Num, Vec, wrap, unwrap
+
+def rand():
+    return Num(_rand())
+
+def randint(low, high):
+    return Num(_randint(int(unwrap(low)), int(unwrap(high))))
+
+def choice(values):
+    result = _choice(unwrap(values))
+    if result.is_ok():
+        from lang_std_native import Ok
+        return Ok(wrap(result.unwrap()))
+    return result
+
+def shuffle(values):
+    return Vec(_shuffle(unwrap(values)))
+"#
+    .to_string()
+}
+
+fn std_iter_source() -> String {
+    r#"from lang_std_native import Iterator, iter as _iter, range as _range, enumerate as _enumerate, zip as _zip, map as _map, filter as _filter, fold as _fold, collect as _collect, any as _any, all as _all
+from primitives import Bool, Num, Vec, wrap, unwrap
+
+def iter(value):
+    return _iter(unwrap(value))
+
+def range(start, end):
+    return _range(int(unwrap(start)), int(unwrap(end)))
+
+def enumerate(value):
+    return _enumerate(unwrap(value))
+
+def zip(left, right):
+    return _zip(unwrap(left), unwrap(right))
+
+def map(value, func):
+    return _map(unwrap(value), func)
+
+def filter(value, func):
+    return _filter(unwrap(value), func)
+
+def fold(value, initial, func):
+    return wrap(_fold(unwrap(value), initial, func))
+
+def collect(value):
+    return Vec(_collect(value))
+
+def any(value, func=None):
+    return Bool(_any(unwrap(value), func))
+
+def all(value, func=None):
+    return Bool(_all(unwrap(value), func))
+"#
+    .to_string()
+}
+
+fn write_generated_file(path: &Path, source: &str) -> Result<(), ModuleError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            ModuleError::new(format!(
+                "Failed to create generated directory '{}': {error}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    fs::write(path, source).map_err(|error| {
+        ModuleError::new(format!(
+            "Failed to write generated file '{}': {error}",
+            path.display()
+        ))
+    })
+}
+
+fn copy_native_runtime(output_root: &Path) -> Result<(), ModuleError> {
+    let source = native_runtime_artifact()?;
+    let target = output_root.join(native_runtime_filename());
+    fs::copy(&source, &target).map_err(|error| {
+        ModuleError::new(format!(
+            "Failed to copy native std runtime from '{}' to '{}': {error}",
+            source.display(),
+            target.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn native_runtime_artifact() -> Result<PathBuf, ModuleError> {
+    static ARTIFACT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+
+    ARTIFACT
+        .get_or_init(build_native_runtime)
+        .clone()
+        .map_err(ModuleError::new)
+}
+
+fn build_native_runtime() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cargo = cargo_command();
+    let output = Command::new(&cargo)
+        .arg("build")
+        .arg("-p")
+        .arg(STD_NATIVE_MODULE)
+        .current_dir(&manifest_dir)
+        .output()
+        .map_err(|error| {
+            format!(
+                "Failed to build native std runtime with '{}': {error}",
+                cargo.display()
+            )
+        })?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to build native std runtime.\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let artifact = manifest_dir
+        .join("target")
+        .join("debug")
+        .join(native_runtime_build_filename());
+    if !artifact.exists() {
+        return Err(format!(
+            "Native std runtime build succeeded but artifact '{}' was not found.",
+            artifact.display()
+        ));
+    }
+
+    Ok(artifact)
+}
+
+fn cargo_command() -> PathBuf {
+    if let Some(cargo) = std::env::var_os("CARGO") {
+        return PathBuf::from(cargo);
+    }
+
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        let candidate = PathBuf::from(home)
+            .join(".cargo")
+            .join("bin")
+            .join("cargo.exe");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let candidate = PathBuf::from(home).join(".cargo").join("bin").join("cargo");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from("cargo")
+}
+
+fn native_runtime_filename() -> &'static str {
+    if cfg!(windows) {
+        "lang_std_native.pyd"
+    } else {
+        "lang_std_native.so"
+    }
+}
+
+fn native_runtime_build_filename() -> &'static str {
+    if cfg!(windows) {
+        "lang_std_native.dll"
+    } else if cfg!(target_os = "macos") {
+        "liblang_std_native.dylib"
+    } else {
+        "liblang_std_native.so"
+    }
 }
 
 fn insert_export(
@@ -1230,8 +1976,7 @@ fn insert_export(
     if exports.contains_key(name) {
         return Err(ModuleError::new(format!(
             "Module '{}' exports '{}' more than once.",
-            module_id,
-            name
+            module_id, name
         )));
     }
     exports.insert(name.to_string(), export);
@@ -1242,7 +1987,10 @@ fn module_segments_from_id(module_id: &str) -> Vec<String> {
     if module_id.is_empty() {
         Vec::new()
     } else {
-        module_id.split('.').map(|segment| segment.to_string()).collect()
+        module_id
+            .split('.')
+            .map(|segment| segment.to_string())
+            .collect()
     }
 }
 
@@ -1275,7 +2023,9 @@ fn module_id_from_path(root: &Path, source_path: &Path) -> Result<String, Module
         .map(|component| component.as_os_str().to_string_lossy().to_string())
         .collect::<Vec<String>>();
 
-    let last = segments.pop().ok_or_else(|| ModuleError::new("Could not determine module name."))?;
+    let last = segments
+        .pop()
+        .ok_or_else(|| ModuleError::new("Could not determine module name."))?;
     if last == "mod.lang" {
         return Ok(segments.join("."));
     }
@@ -1298,12 +2048,18 @@ fn format_module_path(path: &ModulePath) -> String {
 
 fn canonicalize_file(path: &Path) -> Result<PathBuf, ModuleError> {
     fs::canonicalize(path).map_err(|error| {
-        ModuleError::new(format!("Failed to canonicalize file '{}': {error}", path.display()))
+        ModuleError::new(format!(
+            "Failed to canonicalize file '{}': {error}",
+            path.display()
+        ))
     })
 }
 
 fn canonicalize_dir(path: &Path) -> Result<PathBuf, ModuleError> {
     fs::canonicalize(path).map_err(|error| {
-        ModuleError::new(format!("Failed to canonicalize directory '{}': {error}", path.display()))
+        ModuleError::new(format!(
+            "Failed to canonicalize directory '{}': {error}",
+            path.display()
+        ))
     })
 }

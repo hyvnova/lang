@@ -33,7 +33,13 @@ user = User { name: "Ada", age: 36 }
 fn parses_rust_like_object_model_nodes() {
     let nodes = parse_nodes(OBJECT_SOURCE);
 
-    let Node::StructDef { name, generics, fields, .. } = &nodes[0] else {
+    let Node::StructDef {
+        name,
+        generics,
+        fields,
+        ..
+    } = &nodes[0]
+    else {
         panic!("expected struct definition, got {:#?}", nodes[0]);
     };
     assert_eq!(name, "User");
@@ -43,7 +49,13 @@ fn parses_rust_like_object_model_nodes() {
     assert_eq!(fields[1].name, "age");
     assert_eq!(fields[1].type_ref.name, "int");
 
-    let Node::TraitDef { name, generics, methods, .. } = &nodes[1] else {
+    let Node::TraitDef {
+        name,
+        generics,
+        methods,
+        ..
+    } = &nodes[1]
+    else {
         panic!("expected trait definition, got {:#?}", nodes[1]);
     };
     assert_eq!(name, "Named");
@@ -51,14 +63,26 @@ fn parses_rust_like_object_model_nodes() {
     assert_eq!(methods[0].name, "label");
     assert_eq!(methods[0].return_type.as_ref().unwrap().name, "str");
 
-    let Node::ImplBlock { trait_ref, target, methods, .. } = &nodes[2] else {
+    let Node::ImplBlock {
+        trait_ref,
+        target,
+        methods,
+        ..
+    } = &nodes[2]
+    else {
         panic!("expected inherent impl block, got {:#?}", nodes[2]);
     };
     assert!(trait_ref.is_none());
     assert_eq!(target.name, "User");
     assert_eq!(methods[0].signature.name, "rename");
 
-    let Node::ImplBlock { trait_ref, target, methods, .. } = &nodes[3] else {
+    let Node::ImplBlock {
+        trait_ref,
+        target,
+        methods,
+        ..
+    } = &nodes[3]
+    else {
         panic!("expected trait impl block, got {:#?}", nodes[3]);
     };
     assert_eq!(trait_ref.as_ref().unwrap().name, "Named");

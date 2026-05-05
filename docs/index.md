@@ -12,6 +12,9 @@ These docs are the **official syntax reference** for the **tested** language sur
 - [Modules](./syntax/modules.md)
 - [Objects](./syntax/objects.md)
 - [Macros](./syntax/macros.md)
+- [Standard Library](./std/index.md)
+- [Scenario Tests](./testing/scenarios.md)
+- [Language Server](./lsp.md)
 
 ## Validation
 

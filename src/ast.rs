@@ -8,7 +8,10 @@ pub struct ModulePath {
 
 impl ModulePath {
     pub fn new(relative_level: usize, segments: Vec<String>) -> Self {
-        ModulePath { relative_level, segments }
+        ModulePath {
+            relative_level,
+            segments,
+        }
     }
 
     pub fn last_segment(&self) -> Option<&String> {
@@ -59,7 +62,6 @@ pub struct ImplMethod {
     pub body: Box<Node>,
 }
 
-
 #[derive(Debug, Clone)]
 pub enum Node {
     Empty,
@@ -72,7 +74,7 @@ pub enum Node {
 
     /// Represents a member access in an object through the dot operator.
     /// Example: `object.member`
-    MemberAccess { 
+    MemberAccess {
         object: Box<Node>,
         member: Box<Node>,
     },
@@ -86,7 +88,7 @@ pub enum Node {
         op: String,
         rhs: Box<Node>,
     },
-    
+
     UnaryOp {
         op: String,
         expr: Box<Node>,
@@ -95,9 +97,8 @@ pub enum Node {
     /// Represents a function call. Ex. `function(name = value)``
     NamedArg(String, Box<Node>),
 
-    /// An array . Ex. `[1, 2, 3]` 
+    /// An array . Ex. `[1, 2, 3]`
     Array(Box<Node>),
-
 
     /// Indexing. Ex. `array[0]` or `object[key]` or `object[1..3]`
     Index {
@@ -124,7 +125,7 @@ pub enum Node {
     /// Represents a function call. Ex. `function(1, 2, 3)`
     FunctionCall {
         object: Box<Node>,
-        args: Box<Node> // Group or Sequence
+        args: Box<Node>, // Group or Sequence
     },
 
     Return(Box<Node>),
@@ -139,8 +140,8 @@ pub enum Node {
     /// Alias for something
     /// as {Node}
     Alias(Box<Node>),
-    
-    /// Range 
+
+    /// Range
     Range {
         start: Box<Node>,
         end: Box<Node>,
@@ -153,7 +154,7 @@ pub enum Node {
     /// Distribution
     /// {sequence} -> {recipients};
     Distribution {
-        args: Vec<Node>, 
+        args: Vec<Node>,
         recipients: Vec<Node>,
     },
 
@@ -178,11 +179,10 @@ pub enum Node {
         args: Box<Node>,
         body: Box<Node>,
     },
-    
+
     /// Signal
     /// ${name}
     Signal(String),
-
 
     /// Condtional
     /// if {condition} {body} [elif {condition} {body}]* [else {body}]
@@ -223,7 +223,7 @@ pub enum Node {
         public: bool,
     },
 
-    /// Represents a variable declaration. 
+    /// Represents a variable declaration.
     /// The identifier can be a single identifier or a sequence of identifiers.
     /// Ex. `a = 1`, `a, b = 1, 2`
     Assign {
@@ -231,7 +231,7 @@ pub enum Node {
         values: Vec<Node>,
         op: String, // =, +=, -=, *=, /=
     },
-    
+
     /// Signal definition
     /// $ {name} = {value}
     SignalDef {
@@ -254,14 +254,16 @@ pub enum Node {
     Deconstruction {
         identifiers: Vec<Node>,
         value: Box<Node>,
-        default_values: Vec<Node>
+        default_values: Vec<Node>,
     },
 
     /// Represents a function declaration.
     /// Ex. `def function(a, b) { return a + b }`
     FunctionDef {
-        name: String, 
+        name: String,
         args: Box<Node>,
+        params: Vec<FunctionParam>,
+        return_type: Option<TypeRef>,
         body: Box<Node>,
         public: bool,
     },
@@ -302,7 +304,7 @@ pub enum Node {
 
     /// Represents a reactive statement.
     /// A block of code that will be re-executed when any of the dependencies change.
-    ReactiveStmt{
+    ReactiveStmt {
         block: Vec<Node>,
         dependencies: HashSet<String>,
     },
@@ -316,22 +318,21 @@ pub enum Node {
     Loop(Box<Node>), // expects a block as body
 
     /// For loop
-    ForLoop { 
-        item: Box<Node>, // Identifier or Deconstruction
+    ForLoop {
+        item: Box<Node>,     // Identifier or Deconstruction
         iterable: Box<Node>, // Sequence, Range or expr in general
-        body: Box<Node>, // Block
+        body: Box<Node>,     // Block
     },
 
     /// While loop
     WhileLoop {
         condition: Box<Node>,
         body: Box<Node>,
-    }
+    },
 }
 
-
 /// Implementing PartialEq for Node to allow for comparison of expressions.
-/// It only checks for type, not the content of the expressions. 
+/// It only checks for type, not the content of the expressions.
 /// Number(1) == Number(2) will return true.
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
@@ -383,19 +384,19 @@ impl PartialEq for Node {
             _ => false,
         }
     }
-}   
+}
 
 #[derive(Debug, Clone)]
 pub struct AST {
     // Vector of Scopes
     // A scope is a vector of nodes
-    pub scopes: Vec<Vec<Node>>
+    pub scopes: Vec<Vec<Node>>,
 }
 
 impl AST {
     pub fn new() -> Self {
         let childrem = Vec::new();
-        
+
         AST {
             scopes: vec![childrem],
         }
@@ -415,29 +416,36 @@ impl AST {
     pub fn current_scope(&self) -> &Vec<Node> {
         self.scopes.last().unwrap()
     }
-    
+
     /// Return a copy of the current scope.
     pub fn get_scope(&self) -> Vec<Node> {
-        self.scopes.last().unwrap_or_else(|| panic!("No scope found")).clone()
+        self.scopes
+            .last()
+            .unwrap_or_else(|| panic!("No scope found"))
+            .clone()
     }
 
     /// Add a new node to the current scope.
     pub fn add_node(&mut self, node: Node) {
-        self.scopes.last_mut().unwrap_or_else(|| panic!("Can't add node -No scope found")).push(node);
+        self.scopes
+            .last_mut()
+            .unwrap_or_else(|| panic!("Can't add node -No scope found"))
+            .push(node);
     }
 
-    /// Perform a pop operation on the current scope. 
+    /// Perform a pop operation on the current scope.
     pub fn pop_node(&mut self) -> Option<Node> {
         self.scopes.last_mut()?.pop()
     }
-
 
     /// Finds a Signal's dependencies given it's name.
     pub fn find_signal_deps(&self, target: &str) -> Option<HashSet<String>> {
         for scope in &self.scopes {
             for node in scope {
                 match node {
-                    Node::SignalDef {name, dependencies, .. } => {
+                    Node::SignalDef {
+                        name, dependencies, ..
+                    } => {
                         if target == name {
                             return Some(dependencies.clone());
                         }
@@ -465,13 +473,13 @@ impl AST {
         }
         last
     }
-    
+
     // Pop's last node in scope
     // If capturing sequence then scope will be turned into a sequence node and the scope will be poped
     pub fn solve_pop(&mut self, parsing_sequence: bool) -> Option<Node> {
         if parsing_sequence {
             let sequence = Node::Sequence(self.get_scope());
-            
+
             // If only 1 scope then, just clear it out because it's main scope, if poped, big trouble :D
             if self.scopes.len() == 1 {
                 self.scopes.get_mut(0).unwrap().clear();
@@ -479,10 +487,9 @@ impl AST {
                 // Scope should be poped but for some reason that breaks things, so, fuck it.
                 self.scopes.last_mut().unwrap().clear();
             }
-            
+
             return Some(sequence);
         }
         return self.pop_node();
     }
 }
-

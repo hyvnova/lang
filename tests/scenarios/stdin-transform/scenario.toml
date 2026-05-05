@@ -1,0 +1,3 @@
+entry = "main.lang"
+stdin = "lamp\n"
+expected_stdout = "LAMP\n"

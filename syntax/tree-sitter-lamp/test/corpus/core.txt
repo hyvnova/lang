@@ -1,0 +1,120 @@
+==================
+Core syntax
+==================
+
+fn add(a, b) { a + b }
+value = add(1, 2)
+if value == 3 { print(value) } else { print(0) }
+for x in 1..3 { print(x) }
+$a = 1
+$ { print("changed") }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier))
+      (parameter
+        name: (identifier)))
+    body: (block
+      (binary_expression
+        left: (identifier)
+        right: (identifier))))
+  (assignment_statement
+    left: (assignment_target
+      (identifier))
+    operator: (assignment_operator)
+    right: (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (argument
+          (number))
+        (argument
+          (number)))))
+  (conditional_statement
+    condition: (binary_expression
+      left: (identifier)
+      right: (number))
+    consequence: (block
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (argument
+            (identifier)))))
+    (else_clause
+      consequence: (block
+        (call_expression
+          function: (identifier)
+          arguments: (argument_list
+            (argument
+              (number)))))))
+  (for_statement
+    item: (identifier)
+    iterable: (binary_expression
+      left: (number)
+      right: (number))
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (argument
+            (identifier))))))
+  (signal_assignment
+    target: (signal_reference
+      name: (identifier))
+    operator: (assignment_operator)
+    value: (number))
+  (reactive_statement
+    body: (block
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list
+          (argument
+            (string)))))))
+
+==================
+Typed std and collections
+==================
+
+fn fib(n: int) -> int { n }
+value = std.fs.exists("x")
+items = [1, 2]
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_ref
+          name: (identifier))))
+    (return_type
+      (type_ref
+        name: (identifier)))
+    body: (block
+      (identifier)))
+  (assignment_statement
+    left: (assignment_target
+      (identifier))
+    operator: (assignment_operator)
+    right: (call_expression
+      function: (member_expression
+        object: (member_expression
+          object: (identifier)
+          property: (identifier))
+        property: (identifier))
+      arguments: (argument_list
+        (argument
+          (string)))))
+  (assignment_statement
+    left: (assignment_target
+      (identifier))
+    operator: (assignment_operator)
+    right: (array_expression
+      (number)
+      (number))))

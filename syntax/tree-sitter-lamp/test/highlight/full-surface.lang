@@ -1,0 +1,37 @@
+use std.fs as fs
+// <- keyword
+    // <- module.builtin
+
+fn fib(n: int) -> int { n }
+// <- keyword
+   // <- function
+       // <- variable.parameter
+          // <- type
+                   // <- type
+
+struct User { name: str }
+// <- keyword
+       // <- type
+              // <- property
+
+trait Render { fn render(self) -> str }
+// <- keyword
+                  // <- function.method
+
+impl Render for User { fn render(self) -> str { self.name } }
+// <- keyword
+     // <- type
+                // <- type
+
+$count = len([1, 2, 3])
+// <- operator
+
+$ { std.io.println(std.term.bold("changed")) }
+    // <- module.builtin
+
+#[python]
+// <- keyword.directive
+print("ok")
+      // <- string
+#[endpython]
+// <- keyword.directive

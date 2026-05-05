@@ -4,6 +4,7 @@ use lang::{
     ast::{Node, AST},
     lexer::{Kind, Lexer},
     macros::{expand_source_tokens, MacroError},
+    modules::run_project_with_io as run_project_with_io_inner,
     modules::{build_project, run_project, ModuleError},
     parser::Parser,
     transpilers::python_transpiler::Transpiler,
@@ -120,7 +121,10 @@ fn python_output(args: &[&str], stdin: &str) -> std::process::Output {
 
         if !stdin.is_empty() {
             use std::io::Write;
-            command.stdin(std::process::Stdio::piped());
+            command
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
             let mut child = command.spawn().expect("failed to spawn Python process");
             let child_stdin = child.stdin.as_mut().expect("failed to open Python stdin");
             child_stdin
@@ -137,10 +141,7 @@ fn python_output(args: &[&str], stdin: &str) -> std::process::Output {
     panic!("could not find py or python on PATH");
 }
 
-pub fn build_temp_project(
-    files: &[(&str, &str)],
-    entry: &str,
-) -> (PathBuf, PathBuf) {
+pub fn build_temp_project(files: &[(&str, &str)], entry: &str) -> (PathBuf, PathBuf) {
     let root = std::env::temp_dir().join(format!("lang_fixture_{}", random::<u64>()));
     fs::create_dir_all(&root).expect("failed to create temp project root");
 
@@ -155,21 +156,14 @@ pub fn build_temp_project(
     (root.clone(), root.join(entry.replace('/', "\\")))
 }
 
-pub fn build_project_fixture(
-    files: &[(&str, &str)],
-    entry: &str,
-) -> Result<PathBuf, ModuleError> {
+pub fn build_project_fixture(files: &[(&str, &str)], entry: &str) -> Result<PathBuf, ModuleError> {
     let (root, entry_path) = build_temp_project(files, entry);
     let output_root = root.join("__out__");
     build_project(entry_path, Some(root.clone()), &output_root)?;
     Ok(output_root)
 }
 
-pub fn assert_project_runs(
-    files: &[(&str, &str)],
-    entry: &str,
-    expected_stdout: &str,
-) {
+pub fn assert_project_runs(files: &[(&str, &str)], entry: &str, expected_stdout: &str) {
     let (root, entry_path) = build_temp_project(files, entry);
     let output = run_project(entry_path, Some(root)).expect("project run should succeed");
 
@@ -184,11 +178,16 @@ pub fn assert_project_runs(
     assert_eq!(stdout.trim(), expected_stdout);
 }
 
-pub fn assert_project_runtime_error(
-    files: &[(&str, &str)],
-    entry: &str,
-    expected_fragment: &str,
-) {
+pub fn run_project_with_io(
+    entry_file: &Path,
+    project_root: Option<PathBuf>,
+    stdin: &str,
+    args: &[&str],
+) -> Result<std::process::Output, ModuleError> {
+    run_project_with_io_inner(entry_file.to_path_buf(), project_root, stdin, args)
+}
+
+pub fn assert_project_runtime_error(files: &[(&str, &str)], entry: &str, expected_fragment: &str) {
     let (root, entry_path) = build_temp_project(files, entry);
     let output = run_project(entry_path, Some(root)).expect("project run should complete");
 
@@ -208,11 +207,7 @@ pub fn assert_project_runtime_error(
     );
 }
 
-pub fn assert_project_build_error(
-    files: &[(&str, &str)],
-    entry: &str,
-    expected_fragment: &str,
-) {
+pub fn assert_project_build_error(files: &[(&str, &str)], entry: &str, expected_fragment: &str) {
     let error = build_project_fixture(files, entry).expect_err("project build should fail");
     assert!(
         error.message.contains(expected_fragment),

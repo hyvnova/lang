@@ -5,9 +5,10 @@
 /// - Separate statement emission from expression formatting.
 /// - Support implicit return in function bodies.
 /// - Keep global builtins imports for runtime behavior.
-use crate::ast::{ FunctionParam, FunctionSignature, ImplMethod, Node, StructField, TypeRef, AST };
+use crate::ast::{FunctionParam, FunctionSignature, ImplMethod, Node, StructField, TypeRef, AST};
 use itertools::Itertools;
 use regex::Regex;
+use std::cell::Cell;
 use std::fs;
 use std::path::Path;
 
@@ -76,6 +77,8 @@ pub struct Transpiler {
     /// No need to mention this is really bad for performance.
     /// Ex `(1, 2, 3)` -> `Iterator([1, 2, 3])`
     pub auto_sequence_to_iterator: bool,
+
+    block_lambda_counter: Cell<usize>,
 }
 
 impl Transpiler {
@@ -83,7 +86,8 @@ impl Transpiler {
         Transpiler {
             indent_char: "\t".to_string(),
             auto_vars: false,
-            auto_sequence_to_iterator: true,
+            auto_sequence_to_iterator: false,
+            block_lambda_counter: Cell::new(0),
         }
     }
 
@@ -99,24 +103,25 @@ impl Transpiler {
         // Include custom builtins
         // If the builtins directory doesn't exist, skip it
         if !Path::new(&builtins_path).exists() {
-            eprintln!("[Python Transpiler] Custom builtins not found at: {}", builtins_path);
+            eprintln!(
+                "[Python Transpiler] Custom builtins not found at: {}",
+                builtins_path
+            );
             eprintln!("[Python Transpiler] Skipping custom builtins");
         } else {
             emitter.line("# Custom builtins");
             emitter.line("import sys");
             emitter.line(format!("sys.path.append(r'{}')", builtins_path));
 
-            let mut builtin_modules = fs
-                ::read_dir(&builtins_path)
+            let mut builtin_modules = fs::read_dir(&builtins_path)
                 .expect("Failed to read  custom builtin directory")
                 .filter_map(|entry| {
                     let entry: fs::DirEntry = entry.ok()?;
                     let path: std::path::PathBuf = entry.path();
 
-                    if
-                        path.is_file() &&
-                        path.extension().unwrap_or_default() == "py" &&
-                        !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
+                    if path.is_file()
+                        && path.extension().unwrap_or_default() == "py"
+                        && !path.file_stem().unwrap().to_str().unwrap().starts_with('_')
                     {
                         return Some(path.file_stem().unwrap().to_str().unwrap().to_string());
                     }
@@ -125,6 +130,7 @@ impl Transpiler {
                 })
                 .collect::<Vec<String>>();
             builtin_modules.sort();
+            builtin_modules.sort_by_key(|module| (module == "primitives", module.clone()));
 
             // Iterate over the files in a deterministic order.
             for module in builtin_modules {
@@ -154,7 +160,11 @@ impl Transpiler {
                 emitter.line(format!("{} = {}", name, value_str));
             }
 
-            Assign { identifiers, values, op } => {
+            Assign {
+                identifiers,
+                values,
+                op,
+            } => {
                 for (i, ident) in identifiers.iter().enumerate() {
                     let ident_str = self.emit_expr(emitter, ident);
                     let value_str = self.emit_expr(emitter, &values[i]);
@@ -167,7 +177,11 @@ impl Transpiler {
                 emitter.line(format!("return {}", value_str));
             }
 
-            Deconstruction { identifiers, value, default_values } => {
+            Deconstruction {
+                identifiers,
+                value,
+                default_values,
+            } => {
                 let value_str = self.emit_expr(emitter, value);
                 for (i, ident) in identifiers.iter().enumerate() {
                     let ident_str = self.emit_expr(emitter, ident);
@@ -179,37 +193,63 @@ impl Transpiler {
 
                     emitter.line(format!(
                         "{} = {}.get('{}'{})",
-                        ident_str,
-                        value_str,
-                        ident_str,
-                        default
+                        ident_str, value_str, ident_str, default
                     ));
                 }
             }
 
-            FunctionDef { name, args, body, .. } => {
+            FunctionDef {
+                name,
+                args,
+                params,
+                body,
+                ..
+            } => {
                 let args_str = self.emit_arg_list(emitter, args);
                 emitter.line(format!("def {}{}:", name, args_str));
                 emitter.indented(|em| match body.as_ref() {
-                    FnBody(nodes) => self.emit_fn_body(em, nodes),
-                    Block(nodes) => self.emit_block(em, nodes),
-                    other => self.emit_stmt(em, other),
+                    FnBody(nodes) => self.emit_function_body(em, name, params, nodes),
+                    Block(nodes) => self.emit_function_body(em, name, params, nodes),
+                    other => {
+                        self.emit_function_type_checks(em, name, params);
+                        self.emit_stmt(em, other)
+                    }
                 });
             }
 
-            StructDef { name, generics, fields, .. } => {
+            StructDef {
+                name,
+                generics,
+                fields,
+                ..
+            } => {
                 self.emit_struct_def(emitter, name, generics, fields);
             }
 
-            TraitDef { name, generics, methods, .. } => {
+            TraitDef {
+                name,
+                generics,
+                methods,
+                ..
+            } => {
                 self.emit_trait_def(emitter, name, generics, methods);
             }
 
-            ImplBlock { generics, trait_ref, target, methods } => {
+            ImplBlock {
+                generics,
+                trait_ref,
+                target,
+                methods,
+            } => {
                 self.emit_impl_block(emitter, generics, trait_ref.as_ref(), target, methods);
             }
 
-            Conditional { condition, body, elifs, else_body } => {
+            Conditional {
+                condition,
+                body,
+                elifs,
+                else_body,
+            } => {
                 let cond_str = self.emit_expr(emitter, condition);
                 emitter.line(format!("if {}:", cond_str));
                 emitter.indented(|em| self.emit_block_node(em, body));
@@ -231,7 +271,11 @@ impl Transpiler {
                 emitter.indented(|em| self.emit_block_node(em, body));
             }
 
-            ForLoop { item, iterable, body } => {
+            ForLoop {
+                item,
+                iterable,
+                body,
+            } => {
                 let item_str = self.emit_expr(emitter, item);
                 let iter_str = self.emit_expr(emitter, iterable);
                 emitter.line(format!("for {} in {}:", item_str, iter_str));
@@ -244,17 +288,28 @@ impl Transpiler {
                 emitter.indented(|em| self.emit_block_node(em, body));
             }
 
-            SignalDef { name, value, dependencies } => {
+            SignalDef {
+                name,
+                value,
+                dependencies,
+            } => {
                 let line = self.emit_signal_def(emitter, name, value, dependencies);
                 emitter.line(line);
             }
 
-            SignalUpdate { name, value, dependencies } => {
+            SignalUpdate {
+                name,
+                value,
+                dependencies,
+            } => {
                 let line = self.emit_signal_update(emitter, name, value, dependencies);
                 emitter.line(line);
             }
 
-            ReactiveStmt { block, dependencies } => {
+            ReactiveStmt {
+                block,
+                dependencies,
+            } => {
                 emitter.line("def __reactive_stmt():");
                 emitter.indented(|em| self.emit_block(em, block));
                 emitter.line(self.emit_reactive_stmt(dependencies));
@@ -272,9 +327,7 @@ impl Transpiler {
                         let val = self.emit_expr(emitter, arg);
                         format!(
                             "({} if hasattr({}, '__iter__') else itertools.cycle([{}]))",
-                            val,
-                            val,
-                            val
+                            val, val, val
                         )
                     })
                     .collect::<Vec<String>>()
@@ -299,7 +352,11 @@ impl Transpiler {
             FnBody(nodes) => self.emit_block(emitter, nodes),
             Decorator { name, args } => {
                 let deco = if args.is_some() {
-                    format!("@{}{}", self.emit_expr(emitter, name), self.emit_arg_list(emitter, args.as_ref().unwrap()))
+                    format!(
+                        "@{}{}",
+                        self.emit_expr(emitter, name),
+                        self.emit_arg_list(emitter, args.as_ref().unwrap())
+                    )
                 } else {
                     format!("@{}", self.emit_expr(emitter, name))
                 };
@@ -319,41 +376,45 @@ impl Transpiler {
     fn emit_expr(&self, emitter: &mut PyEmitter, node: &Node) -> String {
         use Node::*;
         match node {
-            Number(n) => n.to_string(),
+            Number(n) => format!("Num({})", n),
             Identifier(ident) => ident.to_string(),
             Str(value) => {
                 // * String formatting
                 // Simple: "Hello, %name" -> f"Hello {name}"
                 // Complex: "Hello {name}" -> f"Hello {name}"
-                let simple_format_re: Regex = Regex::new(r"%([$]?[a-zA-Z0-9_]+)").expect(
-                    "Simple formatting regex failed"
-                );
-                let complex_format_re: Regex = Regex::new(
-                    r"\{\s*([$]?[a-zA-Z0-9_]+)\s*(:\s*.*)?\s*}"
-                ).expect("Complex formatting regex failed");
+                let simple_format_re: Regex =
+                    Regex::new(r"%([$]?[a-zA-Z0-9_]+)").expect("Simple formatting regex failed");
+                let complex_format_re: Regex =
+                    Regex::new(r"\{\s*([$]?[a-zA-Z0-9_]+)\s*(:\s*.*)?\s*}")
+                        .expect("Complex formatting regex failed");
 
                 let mut fstring: bool = false;
-                let mut new_val: String = simple_format_re
-                    .replace_all(value, r"{${1}}")
-                    .to_string();
+                let mut new_val: String =
+                    simple_format_re.replace_all(value, r"{${1}}").to_string();
                 if new_val != *value {
                     fstring = true;
                 }
-                new_val = complex_format_re.replace_all(&new_val, r"{${1}${2}}").to_string();
+                new_val = complex_format_re
+                    .replace_all(&new_val, r"{${1}${2}}")
+                    .to_string();
                 if complex_format_re.is_match(&new_val) {
                     fstring = true;
                 }
 
                 if fstring {
-                    format!("f\"{}\"", new_val)
+                    format!("Str(f\"{}\")", new_val)
                 } else {
-                    format!("\"{}\"", value)
+                    format!("Str(\"{}\")", value)
                 }
             }
-            Bool(b) => b.to_string().capitalize(),
+            Bool(b) => format!("Bool({})", b.to_string().capitalize()),
 
             MemberAccess { object, member } => {
-                format!("{}.{}", self.emit_expr(emitter, object), self.emit_expr(emitter, member))
+                format!(
+                    "{}.{}",
+                    self.emit_expr(emitter, object),
+                    self.emit_expr(emitter, member)
+                )
             }
             Group(expr) => format!(
                 "({})",
@@ -375,24 +436,22 @@ impl Transpiler {
 
             Array(values) => {
                 let inner = self.emit_expr(emitter, values);
-                if self.auto_sequence_to_iterator {
-                    format!("Iterator([{}])", inner)
-                } else {
-                    format!("[{}]", inner)
-                }
+                format!("Vec([{}])", inner)
             }
 
             Index { object, index } => {
-                format!("{}[{}]", self.emit_expr(emitter, object), self.emit_expr(emitter, index))
+                format!(
+                    "{}[{}]",
+                    self.emit_expr(emitter, object),
+                    self.emit_expr(emitter, index)
+                )
             }
 
-            Sequence(values) => {
-                values
-                    .iter()
-                    .map(|value| self.emit_expr(emitter, value))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            }
+            Sequence(values) => values
+                .iter()
+                .map(|value| self.emit_expr(emitter, value))
+                .collect::<Vec<String>>()
+                .join(", "),
 
             WrappedSequence(values) => {
                 let inner = values
@@ -409,7 +468,11 @@ impl Transpiler {
             }
 
             FunctionCall { object, args } => {
-                let call = format!("{}{}", self.emit_expr(emitter, object), self.emit_arg_list(emitter, args));
+                let call = format!(
+                    "{}{}",
+                    self.emit_expr(emitter, object),
+                    self.emit_arg_list(emitter, args)
+                );
                 if self.auto_vars {
                     format!("(_ := {})", call)
                 } else {
@@ -418,29 +481,34 @@ impl Transpiler {
             }
 
             Dict { keys, values } => {
-                let mut code: String = String::from("{");
+                let mut code: String = String::from("Map({");
                 for (i, key) in keys.iter().enumerate() {
                     code.push_str(
                         format!(
                             "{}: {}",
                             self.emit_expr(emitter, key),
                             self.emit_expr(emitter, &values[i])
-                        ).as_str()
+                        )
+                        .as_str(),
                     );
                     if i < keys.len() - 1 {
                         code.push_str(", ");
                     }
                 }
-                code.push('}');
+                code.push_str("})");
                 code
             }
 
             Alias(name) => format!("as {}", self.emit_expr(emitter, name)),
             Len(obj) => format!("len({})", self.emit_expr(emitter, obj)),
 
-            Range { start, end, inclusive } => {
+            Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 format!(
-                    "Iterator(tuple(range({}, {}{})))",
+                    "Iterator(tuple(__import__('builtins').range({}, {}{})))",
                     self.emit_expr(emitter, start),
                     self.emit_expr(emitter, end),
                     if *inclusive { "+1" } else { "" }
@@ -452,12 +520,22 @@ impl Transpiler {
                 if args_str.starts_with('(') && args_str.ends_with(')') {
                     args_str = args_str[1..args_str.len() - 1].to_string();
                 }
-                format!("lambda {}: {}", args_str, self.emit_expr(emitter, body))
+                match body.as_ref() {
+                    Block(nodes) | FnBody(nodes) => {
+                        let name = self.next_block_lambda_name();
+                        emitter.line(format!("def {}({}):", name, args_str));
+                        emitter.indented(|em| self.emit_fn_body(em, nodes));
+                        name
+                    }
+                    _ => format!("lambda {}: {}", args_str, self.emit_expr(emitter, body)),
+                }
             }
 
             Signal(name) => format!("{}.value", name),
 
-            Distribution { args, recipients } => self.emit_distribution_expr(emitter, args, recipients),
+            Distribution { args, recipients } => {
+                self.emit_distribution_expr(emitter, args, recipients)
+            }
 
             StructInit { name, fields } => {
                 let args = fields
@@ -515,6 +593,46 @@ impl Transpiler {
         }
     }
 
+    fn emit_function_body(
+        &self,
+        emitter: &mut PyEmitter,
+        name: &str,
+        params: &[FunctionParam],
+        nodes: &[Node],
+    ) {
+        self.emit_function_type_checks(emitter, name, params);
+        self.emit_fn_body(emitter, nodes);
+    }
+
+    fn emit_function_type_checks(
+        &self,
+        emitter: &mut PyEmitter,
+        name: &str,
+        params: &[FunctionParam],
+    ) {
+        let arg_types = self.emit_param_type_map(params, &[]);
+        if arg_types == "{}" {
+            return;
+        }
+
+        let arg_values = params
+            .iter()
+            .map(|param| format!("'{}': {}", param.name, param.name))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        emitter.line(format!(
+            "__lang_check_args__('{}', {}, {{{}}})",
+            name, arg_types, arg_values
+        ));
+    }
+
+    fn next_block_lambda_name(&self) -> String {
+        let value = self.block_lambda_counter.get();
+        self.block_lambda_counter.set(value + 1);
+        format!("__lang_lambda_{}", value)
+    }
+
     /// Emit any node that should behave like a block.
     fn emit_block_node(&self, emitter: &mut PyEmitter, node: &Node) {
         match node {
@@ -568,7 +686,7 @@ impl Transpiler {
         &self,
         emitter: &mut PyEmitter,
         args: &[Node],
-        recipients: &[Node]
+        recipients: &[Node],
     ) -> String {
         let args_str = args
             .iter()
@@ -584,7 +702,11 @@ impl Transpiler {
 
         code.push('(');
         for func in recipients.iter() {
-            code.push_str(&format!("{}({}), ", self.emit_expr(emitter, func), args_str));
+            code.push_str(&format!(
+                "{}({}), ",
+                self.emit_expr(emitter, func),
+                args_str
+            ));
         }
 
         code.pop();
@@ -603,11 +725,14 @@ impl Transpiler {
         emitter: &mut PyEmitter,
         name: &str,
         generics: &[String],
-        fields: &[StructField]
+        fields: &[StructField],
     ) {
         emitter.line(format!("class {}:", name));
         emitter.indented(|em| {
-            em.line(format!("__lang_generics__ = {}", self.emit_string_list(generics)));
+            em.line(format!(
+                "__lang_generics__ = {}",
+                self.emit_string_list(generics)
+            ));
             em.line(format!(
                 "__lang_field_types__ = {}",
                 self.emit_field_type_map(fields, generics)
@@ -639,8 +764,7 @@ impl Transpiler {
 
                 body.line(format!(
                     "__lang_check_struct_fields__('{}', self.__lang_field_types__, {{{}}})",
-                    name,
-                    values
+                    name, values
                 ));
 
                 for field in fields.iter() {
@@ -655,7 +779,7 @@ impl Transpiler {
         emitter: &mut PyEmitter,
         name: &str,
         generics: &[String],
-        methods: &[FunctionSignature]
+        methods: &[FunctionSignature],
     ) {
         let method_names = methods
             .iter()
@@ -676,14 +800,17 @@ impl Transpiler {
         generics: &[String],
         trait_ref: Option<&TypeRef>,
         target: &TypeRef,
-        methods: &[ImplMethod]
+        methods: &[ImplMethod],
     ) {
         let target_name = self.emit_type_name(target);
 
         for method in methods.iter() {
             let function_name = format!("__lang_impl_{}_{}", target.name, method.signature.name);
             self.emit_impl_method(emitter, &function_name, &target_name, generics, method);
-            emitter.line(format!("{}.{} = {}", target_name, method.signature.name, function_name));
+            emitter.line(format!(
+                "{}.{} = {}",
+                target_name, method.signature.name, function_name
+            ));
         }
 
         if let Some(trait_ref) = trait_ref {
@@ -707,7 +834,7 @@ impl Transpiler {
         function_name: &str,
         target_name: &str,
         generics: &[String],
-        method: &ImplMethod
+        method: &ImplMethod,
     ) {
         let params = method
             .signature
@@ -732,10 +859,7 @@ impl Transpiler {
             if arg_types != "{}" {
                 em.line(format!(
                     "__lang_check_args__('{}.{}', {}, {{{}}})",
-                    target_name,
-                    method.signature.name,
-                    arg_types,
-                    arg_values
+                    target_name, method.signature.name, arg_types, arg_values
                 ));
             }
 
@@ -787,9 +911,13 @@ impl Transpiler {
         }
 
         match type_ref.name.as_str() {
-            "str" | "int" | "float" | "bool" | "list" | "dict" | "tuple" | "set" | "object" =>
-                type_ref.name.clone(),
-            "String" => "str".to_string(),
+            "str" | "String" => "Str".to_string(),
+            "int" | "float" => "Num".to_string(),
+            "bool" => "Bool".to_string(),
+            "list" | "tuple" => "Vec".to_string(),
+            "dict" => "Map".to_string(),
+            "set" => "Set".to_string(),
+            "object" => "object".to_string(),
             "Self" => "None".to_string(),
             _ => type_ref.name.clone(),
         }
@@ -815,11 +943,16 @@ impl Transpiler {
         emitter: &mut PyEmitter,
         name: &str,
         value: &Node,
-        dependencies: &std::collections::HashSet<String>
+        dependencies: &std::collections::HashSet<String>,
     ) -> String {
         let deps = dependencies.iter().join(", ");
         if deps.is_empty() {
-            format!("{} = Signal(lambda {}: {})", name, name, self.emit_expr(emitter, value))
+            format!(
+                "{} = Signal(lambda {}: {})",
+                name,
+                name,
+                self.emit_expr(emitter, value)
+            )
         } else {
             format!(
                 "{} = Signal(lambda {}: {}, {})",
@@ -837,11 +970,16 @@ impl Transpiler {
         emitter: &mut PyEmitter,
         name: &str,
         value: &Node,
-        dependencies: &std::collections::HashSet<String>
+        dependencies: &std::collections::HashSet<String>,
     ) -> String {
         let deps = dependencies.iter().join(", ");
         if deps.is_empty() {
-            format!("{}.update(lambda {}: {})", name, name, self.emit_expr(emitter, value))
+            format!(
+                "{}.update(lambda {}: {})",
+                name,
+                name,
+                self.emit_expr(emitter, value)
+            )
         } else {
             format!(
                 "{}.update(lambda {}: {}, {})",

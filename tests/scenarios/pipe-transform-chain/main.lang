@@ -1,0 +1,7 @@
+value = "lamp"
+    .pipe((text) => {
+        text.upper()
+    })
+    .pipe((text) => text.replace("L", "CL"))
+
+print(value)

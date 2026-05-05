@@ -15,8 +15,16 @@ fn parses_member_assignment_as_member_access_lhs() {
         panic!("expected function body, got {:#?}", body);
     };
 
-    let Node::Assign { identifiers, values, .. } = &body_nodes[0] else {
-        panic!("expected assignment in function body, got {:#?}", body_nodes);
+    let Node::Assign {
+        identifiers,
+        values,
+        ..
+    } = &body_nodes[0]
+    else {
+        panic!(
+            "expected assignment in function body, got {:#?}",
+            body_nodes
+        );
     };
 
     assert!(matches!(identifiers[0], Node::MemberAccess { .. }));
@@ -74,7 +82,29 @@ pub answer = 42
 
     assert!(matches!(&nodes[0], Node::ModuleDecl { name, public } if name == "math" && *public));
     assert!(matches!(&nodes[1], Node::ImportStmt { alias, .. } if alias.as_deref() == Some("vec")));
-    assert!(matches!(&nodes[2], Node::FromImport { names, wildcard, .. } if !*wildcard && names.len() == 2));
+    assert!(
+        matches!(&nodes[2], Node::FromImport { names, wildcard, .. } if !*wildcard && names.len() == 2)
+    );
     assert!(matches!(&nodes[3], Node::UseDecl { public, .. } if *public));
-    assert!(matches!(&nodes[4], Node::BindingDef { name, public, .. } if name == "answer" && *public));
+    assert!(
+        matches!(&nodes[4], Node::BindingDef { name, public, .. } if name == "answer" && *public)
+    );
+}
+
+#[test]
+fn parses_typed_top_level_function_signature() {
+    let nodes = parse_nodes("fn fib(n: int) -> int { n }");
+
+    let Node::FunctionDef {
+        params,
+        return_type,
+        ..
+    } = &nodes[0]
+    else {
+        panic!("expected function definition, got {:#?}", nodes[0]);
+    };
+
+    assert_eq!(params[0].name, "n");
+    assert_eq!(params[0].type_ref.as_ref().unwrap().name, "int");
+    assert_eq!(return_type.as_ref().unwrap().name, "int");
 }

@@ -13,36 +13,36 @@ pub enum Kind {
 
     // Statement
     //   Instructions
-    FN_DEF,    // fn - function definition 
-    STRUCT,    // struct - data structure definition
-    TRAIT,     // trait - behavior contract definition
-    IMPL,      // impl - implementation block
-    MOD_DECL,  // mod - module declaration
-    IMPORT,    // import
-    FROM,      // from
-    USE,       // use
-    PUB,       // pub
-    AS,        // as
+    FN_DEF,   // fn - function definition
+    STRUCT,   // struct - data structure definition
+    TRAIT,    // trait - behavior contract definition
+    IMPL,     // impl - implementation block
+    MOD_DECL, // mod - module declaration
+    IMPORT,   // import
+    FROM,     // from
+    USE,      // use
+    PUB,      // pub
+    AS,       // as
 
-    LOOP,     // loop
-    FOR,      // for
-    WHILE,    // while
+    LOOP,  // loop
+    FOR,   // for
+    WHILE, // while
 
     RETURN,   // return
     CONTINUE, // continue
     BREAK,    // break
 
-    IN,       // in (used in for loops. Ex. for i in range(10) )
+    IN, // in (used in for loops. Ex. for i in range(10) )
 
     PYTHON, // Python code. When this keyword appears, everything after it is considered python code until it appears again
 
     // Condtionals are here because can be used as Node
-    IF,      // if
-    ELSE,     // else
-    ELIF,     // elif
+    IF,   // if
+    ELSE, // else
+    ELIF, // elif
 
-    WALRUS,   // := (walrus operator)
-    ASSIGN,   // =, +=, -=, *=, /=, **=, %=
+    WALRUS, // := (walrus operator)
+    ASSIGN, // =, +=, -=, *=, /=, **=, %=
 
     // Node
     //   Parenthesis
@@ -50,8 +50,8 @@ pub enum Kind {
     R_PARENT,
 
     //   Brackets
-    L_BRACKET,  // {
-    R_BRACKET,  // }
+    L_BRACKET, // {
+    R_BRACKET, // }
 
     //   Square brackets
     L_SQUARE_BRACKET, // [
@@ -63,7 +63,6 @@ pub enum Kind {
     STRING,
     TRUE,
     FALSE,
-
 
     //   Quotes
     SINGLE_QUOTE, // '
@@ -78,7 +77,7 @@ pub enum Kind {
     MOD,
 
     // Logical
-    AND , // &&
+    AND, // &&
     OR,  // ||
 
     //   Comparison
@@ -91,28 +90,28 @@ pub enum Kind {
 
     MULTIPLY, // <- placed here because can be used as *{Node} to dereference or unpack... so it's an unary operator
 
-    NOT, // !
+    NOT,     // !
     BIT_AND, // &
-    BIT_OR,// | (bitwise or)
+    BIT_OR,  // | (bitwise or)
     BIT_XOR, // ^
     BIT_NOT, // ~
 
-    AT,   // @
+    AT, // @
 
     // Syntax
     SEMICOLON, // ;
     COLON,     // :
     COMMA,     // ,
-    D_DOT,      // .. (double dot - range operator)
+    D_DOT,     // .. (double dot - range operator)
 
     COMMENT,    // "//" (single line comment)
     ML_COMMENT, // "/*"  (multi line comment start - ends with "*/")
-    
-    DOT,       // .
-    HASH,      // #
+
+    DOT,         // .
+    HASH,        // #
     DOLLAR_SING, // $
 
-    // pipes... 
+    // pipes...
     PIPE_RIGHT, // |>
     PIPE_LEFT,  // <|
 
@@ -121,7 +120,6 @@ pub enum Kind {
     R_ARROW, // ->
 
     FAT_ARROW, // => (used in lambda functions)
-
 }
 
 const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
@@ -135,7 +133,7 @@ const KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
     "return" => Kind::RETURN,
     "continue" => Kind::CONTINUE,
     "break" => Kind::BREAK,
-    
+
 
     // Conditionals
     "if" => Kind::IF,
@@ -272,7 +270,7 @@ impl Lexer {
         // * Number
         if ch.is_numeric() {
             self.capturing_number = true;
-            self.capture(ch, |char| char.is_numeric() || char == '.'); 
+            self.capture(ch, |char| char.is_numeric() || char == '.');
             self.capturing_number = false;
             return Kind::NUMBER;
         }
@@ -343,11 +341,9 @@ impl Lexer {
 
                 loop {
                     self.capture(' ', |char| char != '*'); // Capture until *, since multi line comments are closed with */
-
-                    // Match char that made capture stop
+                                                           // Match char that made capture stop
                     match self.next_char() {
                         Some('*') => {
-
                             // If next char is /, then end of comment
                             if let Some('/') = self.peek_next_char() {
                                 self.next_char(); // Move past /
@@ -503,14 +499,14 @@ impl Lexer {
             ';' => return Kind::SEMICOLON,
             ':' => return Kind::COLON,
             ',' => return Kind::COMMA,
-                
+
             '.' if self.peek_next_char() == Some('.') => {
                 self.current_char_index += 1; // Move past .
                 self.column += 1;
                 self.current_token_value = Some("..".to_string());
                 return Kind::D_DOT;
             }
-            
+
             '.' => return Kind::DOT,
             '#' => {
                 // ! Special keywords
@@ -578,7 +574,7 @@ impl Lexer {
                 self.capturing_string = true;
 
                 // This sucks...  but I don't want to modify capture to take a closure that returns a bool
-                if  ch == '\'' {
+                if ch == '\'' {
                     self.capture(' ', |char| char != '\'');
                 } else {
                     self.capture(' ', |char| char != '"');
@@ -593,10 +589,7 @@ impl Lexer {
             // Reserved for syntax
             '`' => return Kind::BACK_TICK,
 
-            _ => error!(
-                self,
-                format!("Unexpected character: {}", ch)
-            ),
+            _ => error!(self, format!("Unexpected character: {}", ch)),
         }
     }
 
@@ -641,17 +634,11 @@ impl Lexer {
             // When capturing string if cahr is a newline and previous char is not a backslash, error missing closing quote
             if self.capturing_string {
                 if ch.is_none() {
-                    error!(
-                        self,
-                        format!("Missing closing quote for string: {}", value)
-                    );
+                    error!(self, format!("Missing closing quote for string: {}", value));
                 }
 
                 if ch.unwrap() == '\n' && value.chars().last().unwrap_or(' ') != '\\' {
-                    error!(
-                        self,
-                        format!("Missing closing quote for string: {}", value)
-                    );
+                    error!(self, format!("Missing closing quote for string: {}", value));
                 }
             }
 
@@ -666,7 +653,9 @@ impl Lexer {
                 }
             }
 
-            if ch.is_none() || (!condition(ch.unwrap()) && value.chars().last().unwrap_or(' ') != '\\') {
+            if ch.is_none()
+                || (!condition(ch.unwrap()) && value.chars().last().unwrap_or(' ') != '\\')
+            {
                 self.current_char_index -= 1; // Move back, since char is not part of value
                 self.column -= 1;
                 break;
@@ -675,7 +664,6 @@ impl Lexer {
             // Prevent capturing more than 2 dots.
             // If current char is a dot and there's already 1 dot in the value, break
             if ch.unwrap() == '.' && value.matches('.').count() == 1 {
-
                 // If last ch in value is a dot, remove it, otherwise, error since it would be something as 2.3.2
                 if value.chars().last().unwrap() == '.' {
                     value.pop();

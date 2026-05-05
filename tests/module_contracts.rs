@@ -91,7 +91,11 @@ print(value)
     .expect("project should build");
 
     assert!(output_root.join("app").join("__init__.py").exists());
-    assert!(output_root.join("app").join("math").join("__init__.py").exists());
+    assert!(output_root
+        .join("app")
+        .join("math")
+        .join("__init__.py")
+        .exists());
     assert!(output_root.join("app").join("main.py").exists());
 }
 
@@ -383,5 +387,110 @@ from util import __module_str__
         ],
         "main.lang",
         "does not publicly export '__module_str__'",
+    );
+}
+
+#[test]
+fn generated_python_runs_std_prelude_without_imports() {
+    assert_project_runs(
+        &[(
+            "main.lang",
+            r#"
+value = Some("spark")
+print(value.unwrap())
+print(Ok(3).unwrap())
+print(len(range(1, 4)))
+"#,
+        )],
+        "main.lang",
+        "spark\n3\n3",
+    );
+}
+
+#[test]
+fn generated_python_runs_explicit_std_imports() {
+    assert_project_runs(
+        &[(
+            "main.lang",
+            r#"
+from std.text import upper, contains
+from std.random import choice
+from std.term import color
+
+print(upper("lamp"))
+print(contains("lamp", "am"))
+print(choice(range(1, 1)).__class__.__name__)
+print(color("hot", "red"))
+"#,
+        )],
+        "main.lang",
+        "LAMP\nTrue\nErr\n\u{1b}[31mhot\u{1b}[0m",
+    );
+}
+
+#[test]
+fn generated_python_runs_std_module_namespace_import() {
+    assert_project_runs(
+        &[(
+            "main.lang",
+            r#"
+import std.fs as fs
+print(fs.exists("missing-file-for-stdlib-test.txt"))
+"#,
+        )],
+        "main.lang",
+        "False",
+    );
+}
+
+#[test]
+fn generated_python_runs_global_std_object_without_imports() {
+    assert_project_runs(
+        &[(
+            "main.lang",
+            r#"
+print(std.text.upper("lamp"))
+print(std.fs.exists("missing-file-for-global-std-test.txt"))
+print(std.term.bold("hot"))
+"#,
+        )],
+        "main.lang",
+        "LAMP\nFalse\n\u{1b}[1mhot\u{1b}[0m",
+    );
+}
+
+#[test]
+fn generated_project_contains_std_facades_and_native_runtime() {
+    let output_root = build_project_fixture(
+        &[(
+            "main.lang",
+            r#"
+from std.iter import range
+print(len(range(1, 2)))
+"#,
+        )],
+        "main.lang",
+    )
+    .expect("project should build");
+
+    assert!(output_root.join("std").join("__init__.py").exists());
+    assert!(output_root.join("std").join("iter.py").exists());
+    assert!(
+        output_root.join("lang_std_native.pyd").exists()
+            || output_root.join("lang_std_native.so").exists()
+    );
+}
+
+#[test]
+fn rejects_unknown_std_imports() {
+    assert_project_build_error(
+        &[(
+            "main.lang",
+            r#"
+from std.text import screaming
+"#,
+        )],
+        "main.lang",
+        "does not publicly export 'screaming'",
     );
 }

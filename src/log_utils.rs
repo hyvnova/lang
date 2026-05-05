@@ -7,7 +7,7 @@ use crate::lexer::Lexer;
 /// Prints an error message to the console and exits the program.
 ///
 /// # Arguments
-/// * `lexer` - The lexer... 
+/// * `lexer` - The lexer...
 /// * `lines` - A slice of strings to print to the console. These can be error messages or the results of `LogUtilFunction`s.
 /// # Panics
 ///
@@ -50,8 +50,8 @@ pub fn log_error(lexer: &Lexer, lines: &[String]) -> ! {
         let error_line = lines[line - 1];
         eprintln!("\n\x1b[37m{:>5} |\x1b[0m {}", line, error_line);
         eprintln!(
-            "\x1b[37m      |\x1b[0m {:>width$}\x1b[31m^\x1b[0m", 
-            "", 
+            "\x1b[37m      |\x1b[0m {:>width$}\x1b[31m^\x1b[0m",
+            "",
             width = column
         );
     }
@@ -77,9 +77,6 @@ macro_rules! error {
         )
     };
 }
-
-
-
 
 #[cfg(debug_assertions)]
 #[macro_export]
@@ -111,8 +108,6 @@ macro_rules! log {
     ($($arg:tt)*) => {};
 }
 
-
-
 pub fn add_line_numbers(source: &str) -> String {
     source
         .lines()
@@ -122,8 +117,6 @@ pub fn add_line_numbers(source: &str) -> String {
         .join("\n")
 }
 
-
-
 /// Highlight the current line in the source code.
 /// Ex.
 /// ```text
@@ -131,7 +124,11 @@ pub fn add_line_numbers(source: &str) -> String {
 /// ^^^^^^^^
 /// ```
 pub fn dbg_current_line(lexer: &Lexer) {
-    let line = lexer.source.lines().nth(lexer.line - 1).unwrap_or("! No line found !");
+    let line = lexer
+        .source
+        .lines()
+        .nth(lexer.line - 1)
+        .unwrap_or("! No line found !");
 
     println!("{}", line);
     println!("{}", "^".repeat(lexer.current_column()));

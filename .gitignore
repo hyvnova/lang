@@ -4,4 +4,33 @@
 /.github
 **/__pycache__/
 
-out.py
+out.
+
+node_modules
+dist
+build
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Ignore environment files
+.env
+.env.local
+.env.*.local
+
+# Ignore IDE and editor specific files
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore coverage reports
+coverage/
+*.lcov
+*.lcov.info
+

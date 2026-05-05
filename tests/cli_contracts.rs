@@ -28,8 +28,15 @@ print("manifest run")
     );
 
     let output = run_lang_binary(&root, &["run"]);
-    assert!(output.status.success(), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "manifest run");
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "manifest run"
+    );
 }
 
 #[test]
@@ -61,7 +68,11 @@ print("override")
     );
 
     let output = run_lang_binary(&root, &["run", "override.lang"]);
-    assert!(output.status.success(), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "override");
 }
 
@@ -88,8 +99,15 @@ print("default run")
     );
 
     let output = run_lang_binary(&root, &[]);
-    assert!(output.status.success(), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "default run");
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "default run"
+    );
 }
 
 #[test]
@@ -122,7 +140,11 @@ print(value)
     );
 
     let output = run_lang_binary(&root, &["run"]);
-    assert!(output.status.success(), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "7");
 }
 
@@ -160,8 +182,19 @@ print(value)
 
     let output = run_lang_binary(
         &root,
-        &["run", "app/main.lang", "--project-root", ".", "--transpiler", "python"],
+        &[
+            "run",
+            "app/main.lang",
+            "--project-root",
+            ".",
+            "--transpiler",
+            "python",
+        ],
     );
-    assert!(output.status.success(), "stderr:\n{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "9");
 }

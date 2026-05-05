@@ -1,0 +1,26 @@
+{
+  "grammars": [
+    {
+      "name": "lamp",
+      "scope": "source.lamp",
+      "path": ".",
+      "file-types": [
+        "lang",
+        "mod.lang"
+      ],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "injections": "queries/injections.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.0.0",
+    "license": "UNLICENSED",
+    "description": "Local Tree-sitter grammar for the Lamp language",
+    "authors": [
+      {
+        "name": "Codex"
+      }
+    ]
+  }
+}

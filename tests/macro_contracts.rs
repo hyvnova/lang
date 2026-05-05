@@ -18,14 +18,29 @@ struct Square {
     assert!(matches!(&nodes[0], Node::TraitDef { name, .. } if name == "Debug"));
     assert!(matches!(&nodes[1], Node::StructDef { name, .. } if name == "Square"));
 
-    let Node::ImplBlock { trait_ref, target, methods, .. } = &nodes[2] else {
+    let Node::ImplBlock {
+        trait_ref,
+        target,
+        methods,
+        ..
+    } = &nodes[2]
+    else {
         panic!("expected derived Debug impl, got {:#?}", nodes);
     };
-    assert_eq!(trait_ref.as_ref().map(|value| value.name.as_str()), Some("Debug"));
+    assert_eq!(
+        trait_ref.as_ref().map(|value| value.name.as_str()),
+        Some("Debug")
+    );
     assert_eq!(target.name, "Square");
     assert_eq!(methods[0].signature.name, "debug");
 
-    let Node::ImplBlock { trait_ref, target, methods, .. } = &nodes[3] else {
+    let Node::ImplBlock {
+        trait_ref,
+        target,
+        methods,
+        ..
+    } = &nodes[3]
+    else {
         panic!("expected inherent impl, got {:#?}", nodes);
     };
     assert!(trait_ref.is_none());

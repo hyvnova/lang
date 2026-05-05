@@ -1,0 +1,2 @@
+entry = "main.lang"
+expected_stdout = "21\n"

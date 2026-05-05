@@ -1,0 +1,8 @@
+value = "lamp"
+    .tap((text) => {
+        print(text)
+        text
+    })
+    .upper()
+
+print(value)

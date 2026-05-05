@@ -1,0 +1,4 @@
+from .tools import label
+
+name = std.text.upper("lamp")
+print(label(name))

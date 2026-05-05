@@ -1,0 +1,2 @@
+entry = "main.lang"
+expected_stdout = "todo: write parser test\ntodo: update highlight\n"

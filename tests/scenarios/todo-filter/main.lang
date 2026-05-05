@@ -1,0 +1,7 @@
+text = std.fs.read_text("tasks.txt").unwrap()
+lines = std.text.split(text, "\n")
+for line in lines {
+    if std.text.starts_with(line, "todo:") {
+        print(line)
+    }
+}

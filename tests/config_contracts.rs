@@ -60,7 +60,10 @@ print(1)
 
     let manifest = load_manifest(&root.join("lang.toml")).expect("manifest should parse");
     assert_eq!(manifest.project_root, root);
-    assert_eq!(manifest.entry_file, Some(root.join("app").join("main.lang")));
+    assert_eq!(
+        manifest.entry_file,
+        Some(root.join("app").join("main.lang"))
+    );
     assert_eq!(manifest.transpiler.as_deref(), Some("python"));
 }
 
@@ -95,7 +98,9 @@ root = "."
     );
 
     let error = resolve_run_config(None, None, None, &root).expect_err("missing entry should fail");
-    assert!(error.message.contains("Manifest-driven execution requires project.entry"));
+    assert!(error
+        .message
+        .contains("Manifest-driven execution requires project.entry"));
 }
 
 #[test]
@@ -159,7 +164,8 @@ print(1)
         "main.lang",
     );
 
-    let error = resolve_run_config(None, None, None, &root).expect_err("bad transpiler should fail");
+    let error =
+        resolve_run_config(None, None, None, &root).expect_err("bad transpiler should fail");
     assert!(error.message.contains("Unsupported transpiler 'ruby'"));
 }
 

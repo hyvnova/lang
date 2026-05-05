@@ -84,12 +84,17 @@ fn lexes_attribute_macro_tokens_without_affecting_hash_python_blocks() {
         ]
     );
 
-    assert_eq!(lex_kinds("#[python]\nprint('ok')\n#[endpython]"), vec![Kind::PYTHON]);
+    assert_eq!(
+        lex_kinds("#[python]\nprint('ok')\n#[endpython]"),
+        vec![Kind::PYTHON]
+    );
 }
 
 #[test]
 fn lexes_module_system_keywords() {
-    let tokens = lex("pub mod math import .math.vec as vec from app.math import value use app.math.vec.Vec2");
+    let tokens = lex(
+        "pub mod math import .math.vec as vec from app.math import value use app.math.vec.Vec2",
+    );
 
     assert_eq!(
         tokens

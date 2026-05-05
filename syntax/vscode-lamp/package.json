@@ -1,0 +1,78 @@
+{
+  "name": "lamp-syntax",
+  "displayName": "Lamp Language",
+  "description": "Syntax highlighting and Lang language-server support for .lang files",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.117.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:lamp"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node --check extension.js",
+    "package": "vsce package --out lamp-syntax-0.0.0.vsix",
+    "install:local": "code --install-extension lamp-syntax-0.0.0.vsix --force",
+    "dev": "code --extensionDevelopmentPath ."
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "lamp",
+        "aliases": [
+          "Lamp",
+          "lamp"
+        ],
+        "extensions": [
+          ".lang"
+        ],
+        "filenames": [
+          "mod.lang"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lamp",
+        "scopeName": "source.lamp",
+        "path": "./syntaxes/lamp.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.python.lamp": "python"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Lamp",
+      "properties": {
+        "lamp.serverPath": {
+          "type": "string",
+          "default": "lang",
+          "description": "Path to the Lang CLI used to launch the language server."
+        },
+        "lamp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace Lang language-server traffic in the VS Code language client."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

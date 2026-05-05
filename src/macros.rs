@@ -1,85 +1,247 @@
+//! Token-based expansion for Lang's built-in attached attribute macros.
+//!
+//! The macro system in v1 is intentionally narrow: it only understands built-in
+//! attribute macros, it runs before normal item parsing, and it rewrites source
+//! into ordinary tokens that continue through the existing parser and
+//! transpilers.
+//!
+//! At a high level the pipeline is:
+//!
+//! 1. Scan the token stream and collect consecutive `#name(...)` attributes.
+//! 2. Capture the `struct` or `trait` item attached to those attributes.
+//! 3. Dispatch each invocation to its built-in handler.
+//! 4. Inject any generated prelude items once per module.
+//! 5. Append the rewritten primary item and any emitted helper items back into
+//!    the output token stream.
+//!
+//! That shape keeps macro expansion isolated in one place while letting the
+//! rest of the compiler operate on plain Lang items instead of special AST
+//! nodes.
+
 use std::collections::HashSet;
 
 use crate::lexer::{Kind, Lexer, Token};
 
+/// Source coordinates attached to macro parsing and expansion failures.
+///
+/// Macro expansion runs before the parser builds higher-level AST nodes, so the
+/// macro subsystem needs its own lightweight location type for diagnostics.
+/// Keeping line and column together in a dedicated struct makes those errors
+/// easy to thread through parsing helpers and handler dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MacroSpan {
+    /// One-based line number in the source being expanded.
     pub line: usize,
+    /// Zero-based column offset within [`Self::line`].
     pub column: usize,
 }
 
+/// Error reported while parsing or expanding an attached macro invocation.
+///
+/// This is the common error type for the whole module. It keeps the human
+/// message and the best available source span together so callers can surface a
+/// precise failure without depending on later compiler phases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MacroError {
+    /// Human-readable explanation of what failed.
     pub message: String,
+    /// Best-known source location for the failure.
     pub span: MacroSpan,
 }
 
+/// Formats a macro error as `message at line:column`.
 impl std::fmt::Display for MacroError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at {}:{}", self.message, self.span.line, self.span.column)
+        write!(
+            f,
+            "{} at {}:{}",
+            self.message, self.span.line, self.span.column
+        )
     }
 }
 
+/// Marks [`MacroError`] as a standard error value for higher-level callers.
 impl std::error::Error for MacroError {}
 
+/// Parsed representation of one `#name(...)` attribute attached to an item.
+///
+/// Expansion is split into two phases: first the raw invocation is parsed into
+/// this transport type, then a handler decides how to rewrite the attached
+/// item. Storing the name, raw argument tokens, and call-site span separately
+/// keeps the dispatch layer simple and avoids reparsing the `#...(...)` shell.
 #[derive(Debug, Clone)]
 pub struct AttrMacroInvocation {
+    /// Macro identifier immediately following `#`.
     pub name: String,
+    /// Raw tokens found inside the invocation parentheses.
     pub args_tokens: Vec<Token>,
+    /// Source location of the leading `#` token.
     pub span: MacroSpan,
 }
 
+/// Result of expanding one macro handler against one attached item.
+///
+/// Macro handlers can contribute output in three different places, which is why
+/// expansion does not return a single flat token list.
+///
+/// ```text
+/// #derive(debug)
+/// struct Square { w: int, h: int }
+///
+/// prelude_items:
+///   trait Debug { fn debug(self) -> str }
+///
+/// primary_item:
+///   struct Square { w: int, h: int }
+///
+/// emitted_items:
+///   impl Debug for Square { ... }
+///   impl Square { fn __str__(...) -> str { ... } fn __repr__(...) -> str { ... } }
+/// ```
+///
+/// The caller is responsible for de-duplicating preludes and stitching all
+/// three sections back into the module token stream.
 #[derive(Debug, Clone)]
 pub struct MacroExpansion {
+    /// Helper items that should appear before the rewritten target item.
     pub prelude_items: Vec<Vec<Token>>,
+    /// Replacement tokens for the attached item itself.
     pub primary_item: Vec<Token>,
+    /// Extra items emitted after the rewritten target item.
     pub emitted_items: Vec<Vec<Token>>,
 }
 
+/// Shared interface for built-in attached attribute macro handlers.
+///
+/// `AttrMacro` is the outer dispatch layer for attribute names such as
+/// `#derive(...)`. Each implementation validates the invocation syntax that
+/// belongs to that attribute and can chain into more specialized handlers.
 pub trait AttrMacro {
+    /// Returns the canonical attribute name handled by this implementation.
     fn name(&self) -> &'static str;
+
+    /// Expands one parsed invocation against its attached item.
+    ///
+    /// Implementations may keep the item unchanged, rewrite it, inject preludes,
+    /// and emit helper items after it. Failures should point back to the
+    /// invocation or the captured target item.
     fn expand(
         &self,
         invocation: &AttrMacroInvocation,
-        target: &CapturedItem
+        target: &CapturedItem,
     ) -> Result<MacroExpansion, MacroError>;
 }
 
+/// Shared interface for derives inside `#derive(...)`.
+///
+/// `#derive(...)` is itself an attribute macro, but each derive name inside the
+/// argument list has its own behavior. This trait keeps those behaviors
+/// independent so `#derive(debug, ...)` can apply multiple derives in source
+/// order.
 pub trait DeriveHandler {
+    /// Returns the derive name accepted by this handler.
     fn name(&self) -> &'static str;
+
+    /// Rewrites the captured item according to one derive's rules.
     fn expand(&self, target: &CapturedItem) -> Result<MacroExpansion, MacroError>;
 }
 
+/// Reduced semantic shape of an item that macro handlers are allowed to inspect.
+///
+/// Expansion in v1 does not use the full parser. Instead it captures just
+/// enough structure to validate supported macro targets and generate helper
+/// code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CapturedItemKind {
+    /// Parsed description of a `struct` item.
     Struct(StructDescriptor),
+    /// Parsed description of a `trait` item.
     Trait(TraitDescriptor),
 }
 
+/// Minimal description of a struct needed by the built-in derive handlers.
+///
+/// The debug derive only cares about the struct name, generic parameter names,
+/// and declared field order. Keeping this smaller than the full AST parser makes
+/// macro expansion cheap and deterministic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StructDescriptor {
+    /// Struct identifier.
     name: String,
+    /// Generic parameter names in declaration order.
     generics: Vec<String>,
+    /// Field names in declaration order, used to build stable debug output.
     fields: Vec<String>,
 }
 
+/// Minimal description of a trait target recognized by the macro parser.
+///
+/// Traits are currently capturable so the expander can issue a targeted error
+/// when a macro like `#derive(debug)` is attached to the wrong item kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TraitDescriptor {
+    /// Trait identifier.
     name: String,
+    /// Generic parameter names in declaration order.
     generics: Vec<String>,
 }
 
+/// Token-backed item captured after one or more attribute lines.
+///
+/// This is the hand-off format between parsing helpers and macro handlers. It
+/// preserves both the original tokens and a reduced semantic descriptor so
+/// handlers can inspect the target without reparsing the raw item each time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapturedItem {
+    /// Reduced item classification used during dispatch and validation.
     kind: CapturedItemKind,
+    /// Original tokens for the captured item.
     tokens: Vec<Token>,
+    /// Source location of the first token in the captured item.
     span: MacroSpan,
 }
 
+/// Lexes raw source and expands any built-in attached macros it contains.
+///
+/// This helper exists for callers that naturally start from source text instead
+/// of a pre-tokenized stream. It keeps the public API ergonomic while routing
+/// all real expansion logic through [`expand_tokens`].
+///
+/// ```text
+/// input source:
+///   #derive(debug)
+///   struct Square { w: int }
+///
+/// output token stream:
+///   trait Debug { ... }
+///   struct Square { w: int }
+///   impl Debug for Square { ... }
+///   impl Square { fn __str__(...) -> str { ... } fn __repr__(...) -> str { ... } }
+/// ```
 pub fn expand_source_tokens(source: &str) -> Result<Vec<Token>, MacroError> {
     expand_tokens(lex_all(source))
 }
 
+/// Expands built-in attached macros inside an existing token stream.
+///
+/// This is the module's main entry point. It walks the token stream once,
+/// copies non-macro tokens through unchanged, and rewrites each contiguous block
+/// of attribute macros plus its attached item into ordinary Lang items.
+///
+/// ```text
+/// source tokens:
+///   #derive(debug)
+///   struct Square { w: int, h: int }
+///
+/// expanded tokens:
+///   trait Debug { fn debug(self) -> str }
+///   struct Square { w: int, h: int }
+///   impl Debug for Square { fn debug(self) -> str { "Square { w: " + str(self.w) + ", h: " + str(self.h) + " }" } }
+///   impl Square { fn __str__(self) -> str { self.debug() } fn __repr__(self) -> str { self.debug() } }
+/// ```
+///
+/// Prelude items are de-duplicated by token signature so multiple uses of the
+/// same derive in one module inject shared helpers only once.
 pub fn expand_tokens(tokens: Vec<Token>) -> Result<Vec<Token>, MacroError> {
     let mut cursor = 0;
     let mut output = Vec::new();
@@ -132,9 +294,13 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Result<Vec<Token>, MacroError> {
     Ok(output)
 }
 
+/// Routes one parsed attribute invocation to the matching built-in handler.
+///
+/// Keeping dispatch in one function makes the supported macro surface explicit
+/// and gives unknown names a single consistent error path.
 fn expand_attr_macro(
     invocation: &AttrMacroInvocation,
-    target: &CapturedItem
+    target: &CapturedItem,
 ) -> Result<MacroExpansion, MacroError> {
     match invocation.name.as_str() {
         "derive" => {
@@ -149,17 +315,24 @@ fn expand_attr_macro(
     }
 }
 
+/// Built-in handler for `#derive(...)`.
+///
+/// This layer parses the derive list and then delegates each derive name to a
+/// [`DeriveHandler`]. The separation keeps `#derive(...)` responsible only for
+/// attribute-level syntax while per-derive code generation lives elsewhere.
 struct DeriveAttrMacro;
 
 impl AttrMacro for DeriveAttrMacro {
+    /// Returns the attribute name handled by this dispatcher.
     fn name(&self) -> &'static str {
         "derive"
     }
 
+    /// Applies every derive inside one `#derive(...)` invocation in source order.
     fn expand(
         &self,
         invocation: &AttrMacroInvocation,
-        target: &CapturedItem
+        target: &CapturedItem,
     ) -> Result<MacroExpansion, MacroError> {
         let derive_names = parse_derive_names(&invocation.args_tokens, &invocation.span)?;
 
@@ -185,10 +358,12 @@ impl AttrMacro for DeriveAttrMacro {
     }
 }
 
-fn derive_handler(
-    name: &str,
-    span: &MacroSpan
-) -> Result<Box<dyn DeriveHandler>, MacroError> {
+/// Resolves a derive name from `#derive(...)` into its built-in handler.
+///
+/// v1 supports only the names hard-coded here. That keeps the derive surface
+/// obvious and prevents later stages from having to deal with unresolved derive
+/// requests.
+fn derive_handler(name: &str, span: &MacroSpan) -> Result<Box<dyn DeriveHandler>, MacroError> {
     match name {
         "debug" => Ok(Box::new(DebugDeriveHandler)),
         other => Err(MacroError {
@@ -198,13 +373,36 @@ fn derive_handler(
     }
 }
 
+/// Implements the built-in `debug` derive for structs.
+///
+/// The handler emits three pieces of code:
+///
+/// ```text
+/// trait Debug { fn debug(self) -> str }
+/// impl Debug for MyType { fn debug(self) -> str { ... } }
+/// impl MyType { fn __str__(self) -> str { self.debug() } fn __repr__(self) -> str { self.debug() } }
+/// ```
+///
+/// That gives Lang code one canonical string renderer plus the `__str__` and
+/// `__repr__` hooks expected by the Python runtime.
 struct DebugDeriveHandler;
 
 impl DeriveHandler for DebugDeriveHandler {
+    /// Returns the derive name implemented by this handler.
     fn name(&self) -> &'static str {
         "debug"
     }
 
+    /// Generates the `Debug` trait, trait impl, and inherent string helpers.
+    ///
+    /// ```text
+    /// input:
+    ///   #derive(debug)
+    ///   struct Square { w: int, h: int }
+    ///
+    /// runtime output:
+    ///   Square { w: 3, h: 4 }
+    /// ```
     fn expand(&self, target: &CapturedItem) -> Result<MacroExpansion, MacroError> {
         let CapturedItemKind::Struct(descriptor) = &target.kind else {
             return Err(MacroError {
@@ -263,9 +461,23 @@ impl{generics_decl} {target_ref} {{
     }
 }
 
+/// Parses one `#name(...)` attribute invocation starting at `tokens[start]`.
+///
+/// This helper owns the low-level token matching for the attribute shell so the
+/// rest of the expander can work with a normalized [`AttrMacroInvocation`].
+///
+/// ```text
+/// accepted input:
+///   #derive(debug, clone)
+///
+/// failure cases guarded here:
+///   #derive debug)
+///   #derive(debug
+///   #123(debug)
+/// ```
 fn parse_attr_invocation(
     tokens: &[Token],
-    start: usize
+    start: usize,
 ) -> Result<(AttrMacroInvocation, usize), MacroError> {
     let hash = tokens.get(start).ok_or_else(|| MacroError {
         message: "Expected an attribute macro.".to_string(),
@@ -341,9 +553,24 @@ fn parse_attr_invocation(
     })
 }
 
+/// Captures the `struct` or `trait` that immediately follows one or more
+/// attribute lines.
+///
+/// This function is the boundary between "macro syntax" and "item syntax". It
+/// guarantees that handlers always receive a complete item body rather than a
+/// partial token slice.
+///
+/// ```text
+/// #derive(debug)
+/// struct Square {
+///     w: int
+/// }
+///
+/// The returned slice starts at `struct` and ends after the matching `}`.
+/// ```
 fn capture_attached_item(
     tokens: &[Token],
-    start: usize
+    start: usize,
 ) -> Result<(CapturedItem, usize), MacroError> {
     let item_token = tokens.get(start).ok_or_else(|| MacroError {
         message: "Expected a struct or trait after attribute macro.".to_string(),
@@ -398,6 +625,10 @@ fn capture_attached_item(
     })
 }
 
+/// Converts a captured token slice into the reduced item model used by handlers.
+///
+/// This reparsing step runs after every derive so later derives see the current
+/// primary item exactly as it will continue through expansion.
 fn parse_captured_item(tokens: &[Token]) -> Result<CapturedItem, MacroError> {
     let span = tokens
         .first()
@@ -431,13 +662,22 @@ fn parse_captured_item(tokens: &[Token]) -> Result<CapturedItem, MacroError> {
     })
 }
 
+/// Parses the reduced struct metadata needed by derive handlers.
+///
+/// The parser intentionally records field names only. Field types are consumed
+/// for validation and cursor advancement, but they are not retained because the
+/// current derives do not inspect them.
 fn parse_struct_descriptor(
     cursor: &mut TokenCursor<'_>,
-    span: &MacroSpan
+    span: &MacroSpan,
 ) -> Result<StructDescriptor, MacroError> {
     let name = cursor.expect_identifier("Expected a struct name.", span)?;
     let generics = cursor.parse_generic_names(span)?;
-    cursor.expect_kind(Kind::L_BRACKET, "Expected a struct body after struct name.", span)?;
+    cursor.expect_kind(
+        Kind::L_BRACKET,
+        "Expected a struct body after struct name.",
+        span,
+    )?;
 
     let mut fields = Vec::new();
     loop {
@@ -455,16 +695,29 @@ fn parse_struct_descriptor(
         cursor.consume_decl_separators();
     }
 
-    Ok(StructDescriptor { name, generics, fields })
+    Ok(StructDescriptor {
+        name,
+        generics,
+        fields,
+    })
 }
 
+/// Parses just enough of a trait declaration to classify it as a macro target.
+///
+/// The expander keeps trait support minimal because no built-in derive currently
+/// rewrites trait bodies. The descriptor exists mainly so handlers can reject
+/// unsupported targets with a precise message.
 fn parse_trait_descriptor(
     cursor: &mut TokenCursor<'_>,
-    span: &MacroSpan
+    span: &MacroSpan,
 ) -> Result<TraitDescriptor, MacroError> {
     let name = cursor.expect_identifier("Expected a trait name.", span)?;
     let generics = cursor.parse_generic_names(span)?;
-    cursor.expect_kind(Kind::L_BRACKET, "Expected a trait body after trait name.", span)?;
+    cursor.expect_kind(
+        Kind::L_BRACKET,
+        "Expected a trait body after trait name.",
+        span,
+    )?;
 
     let mut brace_depth = 1;
     while let Some(token) = cursor.next() {
@@ -486,10 +739,11 @@ fn parse_trait_descriptor(
     })
 }
 
-fn parse_derive_names(
-    tokens: &[Token],
-    span: &MacroSpan
-) -> Result<Vec<String>, MacroError> {
+/// Parses the comma-separated derive names inside `#derive(...)`.
+///
+/// The returned order matters because derive handlers are applied sequentially.
+/// That lets one derive rewrite the primary item before the next derive sees it.
+fn parse_derive_names(tokens: &[Token], span: &MacroSpan) -> Result<Vec<String>, MacroError> {
     let mut cursor = TokenCursor::new(tokens);
     let mut names = Vec::new();
 
@@ -521,6 +775,13 @@ fn parse_derive_names(
     Ok(names)
 }
 
+/// Formats generic parameter names for an `impl` or item declaration header.
+///
+/// ```text
+/// []        -> ""
+/// ["T"]     -> "<T>"
+/// ["K","V"] -> "<K, V>"
+/// ```
 fn generic_decl(generics: &[String]) -> String {
     if generics.is_empty() {
         String::new()
@@ -529,6 +790,10 @@ fn generic_decl(generics: &[String]) -> String {
     }
 }
 
+/// Formats a type reference using the declared generic parameter names.
+///
+/// This is used when generated code needs to refer back to the original target
+/// type, for example `Square<T>` in derived impl blocks.
 fn type_ref_source(name: &str, generics: &[String]) -> String {
     if generics.is_empty() {
         name.to_string()
@@ -537,6 +802,18 @@ fn type_ref_source(name: &str, generics: &[String]) -> String {
     }
 }
 
+/// Builds the Lang expression used by `#derive(debug)` to render a struct.
+///
+/// The expression preserves field declaration order so display output stays
+/// stable across parser, transpiler, and runtime tests.
+///
+/// ```text
+/// build_debug_expr("Square", ["w", "h"])
+/// => "Square { w: " + str(self.w) + ", h: " + str(self.h) + " }"
+///
+/// runtime output for `Square { w: 3, h: 4 }`
+/// => Square { w: 3, h: 4 }
+/// ```
 fn build_debug_expr(type_name: &str, fields: &[String]) -> String {
     if fields.is_empty() {
         return format!("\"{} {{}}\"", type_name);
@@ -554,6 +831,10 @@ fn build_debug_expr(type_name: &str, fields: &[String]) -> String {
     expr
 }
 
+/// Fully lexes a source snippet into tokens.
+///
+/// Macro handlers use this to turn generated Lang source fragments back into
+/// the token representation expected by the rest of the expansion pipeline.
 fn lex_all(source: &str) -> Vec<Token> {
     let mut lexer = Lexer::new(source.to_string());
     let mut tokens = Vec::new();
@@ -565,6 +846,10 @@ fn lex_all(source: &str) -> Vec<Token> {
     tokens
 }
 
+/// Produces a stable signature for a generated item based on token kind/value pairs.
+///
+/// Prelude items are compared by this signature so identical generated helpers,
+/// such as the `Debug` trait, are injected only once per module.
 fn token_signature(tokens: &[Token]) -> String {
     tokens
         .iter()
@@ -573,36 +858,55 @@ fn token_signature(tokens: &[Token]) -> String {
         .join("|")
 }
 
+/// Small read-only cursor used by the macro parser's token-level helpers.
+///
+/// The full parser has its own machinery. This cursor keeps macro expansion
+/// independent from that machinery while still giving helper functions a clear
+/// way to consume and validate token sequences.
 struct TokenCursor<'a> {
+    /// Token slice being traversed.
     tokens: &'a [Token],
+    /// Index of the next unread token.
     index: usize,
 }
 
 impl<'a> TokenCursor<'a> {
+    /// Creates a cursor positioned at the start of `tokens`.
     fn new(tokens: &'a [Token]) -> Self {
         TokenCursor { tokens, index: 0 }
     }
 
+    /// Returns the next token and advances the cursor by one position.
     fn next(&mut self) -> Option<&'a Token> {
         let token = self.tokens.get(self.index)?;
         self.index += 1;
         Some(token)
     }
 
+    /// Returns the next token without advancing the cursor.
     fn peek(&self) -> Option<&'a Token> {
         self.tokens.get(self.index)
     }
 
+    /// Checks whether the next token matches the requested kind.
     fn peek_kind(&self, kind: Kind) -> bool {
         matches!(self.peek(), Some(token) if token.kind == kind)
     }
 
+    /// Consumes consecutive newline tokens.
+    ///
+    /// Derive lists allow line breaks between names, so this helper keeps that
+    /// whitespace policy localized.
     fn skip_newlines(&mut self) {
         while self.peek_kind(Kind::NEW_LINE) {
             self.next();
         }
     }
 
+    /// Consumes commas, semicolons, and newline separators between declarations.
+    ///
+    /// Struct fields can be separated by any of those tokens in Lang source, so
+    /// descriptor parsing normalizes them here instead of branching repeatedly.
     fn consume_decl_separators(&mut self) {
         while let Some(token) = self.peek() {
             match token.kind {
@@ -614,13 +918,17 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    fn expect_identifier(
-        &mut self,
-        message: &str,
-        span: &MacroSpan
-    ) -> Result<String, MacroError> {
+    /// Consumes and returns the next identifier token.
+    ///
+    /// On failure this reports the found token kind, which makes malformed
+    /// macro targets much easier to debug than a generic "expected identifier".
+    fn expect_identifier(&mut self, message: &str, span: &MacroSpan) -> Result<String, MacroError> {
         match self.next() {
-            Some(Token { kind: Kind::IDENTIFIER, value, .. }) => Ok(value.clone()),
+            Some(Token {
+                kind: Kind::IDENTIFIER,
+                value,
+                ..
+            }) => Ok(value.clone()),
             Some(token) => Err(MacroError {
                 message: format!("{} Got: {:?}.", message, token.kind),
                 span: MacroSpan {
@@ -635,11 +943,14 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
+    /// Requires the next token to have the given kind.
+    ///
+    /// This is the basic structural assertion used throughout the item parsers.
     fn expect_kind(
         &mut self,
         kind: Kind,
         message: &str,
-        span: &MacroSpan
+        span: &MacroSpan,
     ) -> Result<(), MacroError> {
         match self.next() {
             Some(token) if token.kind == kind => Ok(()),
@@ -657,6 +968,11 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
+    /// Parses a simple `<T, U, ...>` generic parameter list.
+    ///
+    /// The macro system only needs parameter names, not bounds or defaults, so
+    /// this helper intentionally accepts the small subset used by the current
+    /// language grammar and generated code.
     fn parse_generic_names(&mut self, span: &MacroSpan) -> Result<Vec<String>, MacroError> {
         if !self.peek_kind(Kind::LT) {
             return Ok(Vec::new());
@@ -669,7 +985,9 @@ impl<'a> TokenCursor<'a> {
             generics.push(self.expect_identifier("Expected a generic parameter name.", span)?);
 
             match self.peek() {
-                Some(Token { kind: Kind::COMMA, .. }) => {
+                Some(Token {
+                    kind: Kind::COMMA, ..
+                }) => {
                     self.next();
                 }
                 Some(Token { kind: Kind::GT, .. }) => {
@@ -697,6 +1015,11 @@ impl<'a> TokenCursor<'a> {
         Ok(generics)
     }
 
+    /// Consumes a type reference without building a semantic representation.
+    ///
+    /// Macro derives currently only need to know that a field has some type and
+    /// where that type ends. This helper advances through nested generic
+    /// brackets until the next field separator or closing brace.
     fn consume_type_ref(&mut self, span: &MacroSpan) -> Result<(), MacroError> {
         let mut consumed_any = false;
         let mut angle_depth = 0;
@@ -736,10 +1059,12 @@ impl<'a> TokenCursor<'a> {
     }
 }
 
+/// Targeted tests for the small token parsers in this module.
 #[cfg(test)]
 mod tests {
-    use super::{parse_derive_names, lex_all, MacroSpan};
+    use super::{lex_all, parse_derive_names, MacroSpan};
 
+    /// Confirms that `#derive(a, b, c)` preserves the declared derive order.
     #[test]
     fn derive_name_parser_preserves_source_order() {
         let names = parse_derive_names(

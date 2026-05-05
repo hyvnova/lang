@@ -14,7 +14,7 @@ fn emits_indented_function_body_with_implicit_return() {
 fn emits_nested_control_flow_with_pass_for_empty_blocks() {
     assert_eq!(
         transpile_body("if true { loop {} } else {}"),
-        "if True:\n\twhile True:\n\t\tpass\nelse:\n\tpass"
+        "if Bool(True):\n\twhile True:\n\t\tpass\nelse:\n\tpass"
     );
 }
 
@@ -117,5 +117,69 @@ counter = Counter(5)
 print(counter.value)
 "#,
         "5",
+    );
+}
+
+#[test]
+fn generated_python_runs_primitive_raw_escape() {
+    assert_python_runs(
+        r#"
+#[python]
+def raw_type(value):
+    return type(value).__name__
+#[endpython]
+
+value = "lamp"
+print(raw_type(value))
+print(raw_type(value.raw))
+"#,
+        "Str\nstr",
+    );
+}
+
+#[test]
+fn generated_python_runs_primitive_method_model() {
+    assert_python_runs(
+        r#"
+text = " hello lang "
+print(text.strip().upper())
+print(text.strip().len)
+print("a\nb".lines().len)
+print("a b c".words().length)
+print([1, 2, 3].len)
+print([1, 2, 3].map((n) => n + 1).join(","))
+fn add(acc, n) { acc + n }
+print([1, 2, 3].fold(0, add))
+data = Map()
+data.set("age", 36)
+data.set("name", "ada")
+print(data.get("name").title())
+print(data.len)
+seen = Set([1, 2])
+seen.add(3)
+print(seen.contains(2))
+print(seen.union(Set([3, 4])).len)
+print("x".tap((value) => print(value)).pipe((value) => value + "y"))
+"#,
+        "HELLO LANG\n10\n2\n3\n3\n2,3,4\n6\nAda\n2\nTrue\n4\nx\nxy",
+    );
+}
+
+#[test]
+fn generated_python_runs_block_lambda_tap_and_pipe() {
+    assert_python_runs(
+        r#"
+value = "ok"
+    .tap((text) => {
+        print(text)
+        text
+    })
+    .pipe((text) => {
+        text + "!"
+    })
+
+print(value)
+"#,
+        "ok\nok!",
     );
 }

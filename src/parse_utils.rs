@@ -1,12 +1,16 @@
-use crate::{ast::Node, lexer::{Kind, Token}};
-
+use crate::{
+    ast::Node,
+    lexer::{Kind, Token},
+};
 
 /// Checks if a token is of a certain kind.
 /// Yes, this is escentially just a shortcut for `token.kind == kind`.
 /// I like my code drippy bruh
 pub trait IsKind {
     fn is(&self, k: Kind) -> bool;
-    fn is_not(&self, k: Kind) -> bool { !self.is(k) }
+    fn is_not(&self, k: Kind) -> bool {
+        !self.is(k)
+    }
 }
 
 impl IsKind for Option<Token> {
@@ -24,28 +28,26 @@ impl IsKind for Token {
     }
 }
 
-
 /// Shortcut for `into_iter().next().unwrap_or_else(|| default)`.
 /// Converts contractors into an iterator, takes the first element, and if there is none, returns the default value.
 /// Overall this is supposed to make code more readable
 /// ### Example (without)
 /// ```ignore
-/// let rhs: Node = self.parse_until(None).into_iter().next().unwrap_or_else(|| {  // <-- This 
+/// let rhs: Node = self.parse_until(None).into_iter().next().unwrap_or_else(|| {  // <-- This
 ///     error!(&self.lexer, "Expected an value after assignment operator.")
 /// });
 /// ```
-/// 
+///
 /// ### Example (with)
 /// ```ignore
 /// let rhs: Node = self.parse_until(None).get_first_or_else(|| { error!(&self.lexer, "Expected an value after assignment operator.") });
 /// ```
 pub trait GetFirstOrElse {
-
     fn get_first_or_else<F>(self, default_fn: F) -> Self::Item
-        where 
-            Self: Sized + IntoIterator,
-            F: FnOnce() -> Self::Item 
-    { 
+    where
+        Self: Sized + IntoIterator,
+        F: FnOnce() -> Self::Item,
+    {
         self.into_iter().next().unwrap_or_else(default_fn)
     }
 }

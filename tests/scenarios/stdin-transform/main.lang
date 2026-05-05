@@ -1,0 +1,5 @@
+name = std.io.read_line()
+    .strip()
+    .upper()
+
+print(name)

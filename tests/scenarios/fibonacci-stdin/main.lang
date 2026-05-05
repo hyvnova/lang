@@ -1,0 +1,16 @@
+fn fib(n: int) -> int {
+    a = 0
+    b = 1
+    i = 0
+    while i < n {
+        next = a + b
+        a = b
+        b = next
+        i = i + 1
+    }
+    a
+}
+
+line = std.io.read_line()
+n = int(line)
+print(fib(n))
